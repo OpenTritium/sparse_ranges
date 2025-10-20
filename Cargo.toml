@@ -1,0 +1,20 @@
+[package]
+name = "sparse_ranges"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[dev-dependencies]
+range-set-blaze = "0.3.0"
+criterion = "0.7.0"
+rand = "0.9.2"
+
+
+[[bench]]
+name = "insert"
+harness = false
+
+[[bench]]
+name = "union"
+harness = false
