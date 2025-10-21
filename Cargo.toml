@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+http-range-header = "0.4.2"
+thiserror = "2.0.17"
 
 [dev-dependencies]
 range-set-blaze = "0.3.0"
@@ -21,4 +23,8 @@ harness = false
 
 [[bench]]
 name = "diff"
+harness = false
+
+[[bench]]
+name = "chunk"
 harness = false
