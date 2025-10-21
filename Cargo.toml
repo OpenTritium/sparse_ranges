@@ -18,3 +18,7 @@ harness = false
 [[bench]]
 name = "union"
 harness = false
+
+[[bench]]
+name = "diff"
+harness = false

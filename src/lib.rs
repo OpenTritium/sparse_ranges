@@ -1,7 +1,7 @@
 #![feature(btree_cursors)]
 #![feature(if_let_guard)]
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     ops::{self, Bound},
 };
 
@@ -97,8 +97,19 @@ impl From<&ops::RangeInclusive<usize>> for OffsetRange {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct OffsetRangeSet(BTreeSet<OffsetRange>);
+impl From<(usize, usize)> for OffsetRange {
+    #[inline]
+    fn from(rng: (usize, usize)) -> Self {
+        debug_assert!(rng.0 <= rng.1);
+        Self {
+            start: rng.0,
+            last: rng.1,
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct OffsetRangeSet(BTreeMap<usize, usize>);
 
 impl OffsetRangeSet {
     pub fn new() -> Self {
@@ -106,13 +117,9 @@ impl OffsetRangeSet {
     }
 
     pub fn insert_range(&mut self, rng: &OffsetRange) -> bool {
-        let x = BTreeMap::<OffsetRange, usize>::new();
-
         // 定位光标到可能与 rng 相交的第一个位置
-        let mut cursor = self
-            .0
-            .upper_bound_mut(Bound::Included(&OffsetRange::new(rng.start, rng.start)));
-        if let Some(prev) = cursor.peek_prev()
+        let mut cursor = self.0.upper_bound_mut(Bound::Included(&rng.start));
+        if let Some(prev) = cursor.peek_prev().map(|(l, r)| OffsetRange::from((*l, *r)))
             && prev.intersects_or_adjacent(rng)
         {
             cursor.prev();
@@ -121,7 +128,7 @@ impl OffsetRangeSet {
         // 我们只需要检查光标当前位置的下一个元素。
         // 如果这个元素（第一个可能与之相交的元素）已经包含了新范围，
         // 那么插入就是一个无操作，直接返回 false。
-        if let Some(next) = cursor.peek_next()
+        if let Some(next) = cursor.peek_next().map(|(l, r)| OffsetRange::from((*l, *r)))
             && next.contains(rng)
         {
             return false;
@@ -133,83 +140,202 @@ impl OffsetRangeSet {
         // 只要下一个元素存在(peek_next)并且(map_or)与我们的范围相交，就继续循环
         while cursor
             .peek_next()
-            .is_some_and(|next| merged_rng.intersects_or_adjacent(next))
+            .map(|(l, r)| OffsetRange::from((*l, *r)))
+            .is_some_and(|next| merged_rng.intersects_or_adjacent(&next))
         {
-            let range_to_merge = unsafe { cursor.remove_next().unwrap_unchecked() };
+            let range_to_merge: OffsetRange =
+                unsafe { cursor.remove_next().unwrap_unchecked().into() };
             merged_rng = unsafe { merged_rng.merge(&range_to_merge).unwrap_unchecked() };
         }
-        unsafe { cursor.insert_after(merged_rng).unwrap_unchecked() };
+        unsafe {
+            cursor
+                .insert_after(merged_rng.start, merged_rng.last)
+                .unwrap_unchecked()
+        };
         true
     }
 
     #[must_use]
-    pub fn union(&self, other: &Self) -> Self {
-        let mut result_set = BTreeSet::new();
+    pub fn union_merge(&self, other: &Self) -> Self {
+        let mut result_set = BTreeMap::new();
         let mut self_iter = self.0.iter().peekable();
         let mut other_iter = other.0.iter().peekable();
 
-        // 'current_merged' 存储当前正在构建的、可能还会继续扩大的范围。
+        // 存储当前正在构建的、可能还会继续扩大的范围。
         let mut current_merged: Option<OffsetRange> = None;
 
-        // 只要任一迭代器中还有元素，就继续循环。
-        while self_iter.peek().is_some() || other_iter.peek().is_some() {
+        // 使用无限循环，并在内部处理所有情况，包括终止条件。
+        loop {
             // 从两个迭代器的头部选择 'start' 值最小的范围作为下一个处理对象。
-            // 这里的 unwrap 是安全的，因为循环条件保证了至少有一个迭代器非空。
-            let next_range = match (self_iter.peek(), other_iter.peek()) {
-                (Some(&r1), Some(&r2)) => {
-                    if r1.start() <= r2.start() {
-                        unsafe { self_iter.next().unwrap_unchecked() }
-                    } else {
-                        unsafe { other_iter.next().unwrap_unchecked() }
+            // 这个 match 结构清晰地处理了所有情况，并自然地包含了循环的退出点。
+            let next_range_tuple = unsafe {
+                match (self_iter.peek(), other_iter.peek()) {
+                    // 两个迭代器都有元素，选择起始点更早的那个。
+                    (Some(&s_rng), Some(&o_rng)) => {
+                        if s_rng.0 <= o_rng.0 {
+                            self_iter.next().unwrap_unchecked() // 安全：因为 peek() 返回 Some
+                        } else {
+                            other_iter.next().unwrap_unchecked()
+                        }
                     }
+                    // 只有 self_iter 有元素，取之。
+                    (Some(_), None) => self_iter.next().unwrap_unchecked(),
+                    // 只有 other_iter 有元素，取之。
+                    (None, Some(_)) => other_iter.next().unwrap_unchecked(),
+                    // 两个迭代器都已耗尽，合并过程结束。
+                    (None, None) => break,
                 }
-                (Some(_), None) => unsafe { self_iter.next().unwrap_unchecked() },
-                (None, Some(_)) => unsafe { other_iter.next().unwrap_unchecked() },
-                (None, None) => unreachable!(), // 循环条件已阻止此情况
             };
 
-            match current_merged {
+            // 将元组转换为我们的范围类型
+            let next_range = OffsetRange::new(*next_range_tuple.0, *next_range_tuple.1);
+
+            match current_merged.as_mut() {
+                // Case 1: 这是第一个范围，或者我们刚完成了一个合并间隙。
+                // 直接将 next_range 作为新的合并起点。
                 None => {
-                    // 如果没有正在进行的合并，那么 'next_range' 就是新的合并起点。
-                    current_merged = Some(*next_range);
+                    current_merged = Some(next_range);
+                }
+                // Case 2: 当前有一个正在合并的范围。
+                Some(merged) if merged.intersects_or_adjacent(&next_range) => {
+                    // 新范围与当前合并的范围重叠或相邻，扩大 `merged` 的边界。
+                    // 直接修改，因为 `as_mut()` 提供了可变引用。
+                    merged.last = merged.last.max(next_range.last);
                 }
                 Some(merged) => {
-                    // 如果存在一个正在合并的范围 'merged'，
-                    // 检查 'next_range' 是否能与之合并。
-                    if merged.intersects_or_adjacent(next_range) {
-                        // 可以合并，则更新 'current_merged' 为合并后的更大范围。
-                        // 这里的 unwrap 是安全的，因为上面的条件检查已经保证了可以合并。
-                        current_merged = Some(merged.merge(next_range).unwrap());
-                    } else {
-                        // 如果不能合并（有间隙），说明 'merged' 这个范围已经构建完毕。
-                        // 1. 将已完成的 'merged' 存入结果集。
-                        result_set.insert(merged);
-                        // 2. 将 'next_range' 作为新的合并起点。
-                        current_merged = Some(*next_range);
-                    }
+                    // 新范围与当前合并的范围有间隙。
+                    // 1. 说明 `merged` 已经构建完毕，将其存入结果集。
+                    result_set.insert(merged.start, merged.last);
+                    // 2. 将 `next_range` 作为新的合并起点。
+                    *merged = next_range;
                 }
             }
         }
-
-        // 循环结束后，最后一个正在进行的 'current_merged' 还没有被存入结果集。
-        // 需要在这里把它加进去。
-        if let Some(last_range) = current_merged {
-            result_set.insert(last_range);
+        // 循环结束后，最后一个正在进行的 `current_merged` 还没有被存入结果集。
+        if let Some(last_rng) = current_merged {
+            result_set.insert(last_rng.start, last_rng.last);
         }
 
         OffsetRangeSet(result_set)
+    }
+
+    #[must_use]
+    #[inline]
+    fn union(&self, other: &Self) -> Self {
+        if self.0.is_empty() {
+            return other.clone();
+        }
+        if other.0.is_empty() {
+            return self.clone();
+        }
+        let self_ranges_count = self.0.len();
+        let other_ranges_count = other.0.len();
+        let insertion_cost_estimate = other_ranges_count * self_ranges_count.ilog2() as usize;
+        let merge_cost_estimate = self_ranges_count + other_ranges_count;
+        if insertion_cost_estimate < merge_cost_estimate && other_ranges_count < self_ranges_count {
+            let mut result = self.0.clone();
+            for (start, last) in &other.0 {
+                result.insert(*start, *last);
+            }
+            OffsetRangeSet(result)
+        } else {
+            let result = self.clone();
+            result.union_merge(other)
+        }
+    }
+    pub fn difference(&self, other: &Self) -> Self {
+        if self.0.is_empty() || other.0.is_empty() {
+            return self.clone();
+        }
+
+        let mut result = OffsetRangeSet::new();
+        let mut a_iter = self.0.iter();
+        let mut b_iter = other.0.iter().peekable();
+
+        // 从 A 中获取第一个范围
+        let mut current_a = match a_iter.next() {
+            Some((&start, &last)) => OffsetRange::new(start, last),
+            None => return result, // A 是空的
+        };
+
+        loop {
+            // 查看 B 的下一个范围
+            match b_iter.peek() {
+                // Case 1: B 中还有范围
+                Some(&(&b_start, &b_last)) => {
+                    let b_range = OffsetRange::new(b_start, b_last);
+
+                    // 如果 b_range 完全在 current_a 之前，跳过这个 b_range
+                    if b_range.last() < current_a.start() {
+                        b_iter.next(); // 消耗掉 b_range
+                        continue;
+                    }
+
+                    // 如果 b_range 完全在 current_a 之后，说明 current_a 不会再被裁剪
+                    // 完成对 current_a 的处理，然后尝试从 A 获取下一个
+                    if b_range.start() > current_a.last() {
+                        result.insert_range(&current_a);
+                        if let Some((&s, &l)) = a_iter.next() {
+                            current_a = OffsetRange::new(s, l);
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    // --- 处理重叠 ---
+
+                    // 如果 b_range 在 current_a 的前面留下了一部分
+                    if b_range.start() > current_a.start() {
+                        let prefix = OffsetRange::new(current_a.start(), b_range.start() - 1);
+                        result.insert_range(&prefix);
+                    }
+
+                    // 更新 current_a 的起点，跳过被 b_range 覆盖的部分
+                    // 如果 b_range.last() 溢出了，说明 current_a 被完全覆盖
+                    if let Some(new_start) = b_range.last().checked_add(1) {
+                        // 如果 new_start 已经超出了 current_a 的范围
+                        if new_start > current_a.last() {
+                            // current_a 被完全处理完毕，获取下一个
+                            current_a = match a_iter.next() {
+                                Some((&s, &l)) => OffsetRange::new(s, l),
+                                None => break, // A 耗尽，结束
+                            };
+                        } else {
+                            // current_a 还有剩余，更新起点继续处理
+                            current_a = OffsetRange::new(new_start, current_a.last());
+                        }
+                    } else {
+                        // b_range.last() 是 usize::MAX，current_a 之后不可能还有剩余
+                        current_a = match a_iter.next() {
+                            Some((&s, &l)) => OffsetRange::new(s, l),
+                            None => break, // A 耗尽，结束
+                        };
+                    }
+                }
+                // Case 2: B 已经耗尽，A 中所有剩余的范围都属于结果
+                None => {
+                    result.insert_range(&current_a);
+                    for (&start, &last) in a_iter {
+                        result.insert_range(&OffsetRange::new(start, last));
+                    }
+                    break; // 结束主循环
+                }
+            }
+        }
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{OffsetRange, OffsetRangeSet};
-    use std::{collections::BTreeSet, ops::RangeInclusive};
+    use std::{collections::BTreeMap, ops::RangeInclusive};
 
-    fn btree_set(ranges: &[RangeInclusive<usize>]) -> BTreeSet<OffsetRange> {
+    fn btree_set(ranges: &[RangeInclusive<usize>]) -> BTreeMap<usize, usize> {
         ranges
             .iter()
-            .map(|r| OffsetRange::new(*r.start(), *r.end()))
+            .map(|rng| (*rng.start(), *rng.end()))
             .collect()
     }
 
@@ -348,7 +474,7 @@ mod tests {
         let set1 = range_set(&[]);
         let set2 = range_set(&[]);
         let expected = range_set(&[]);
-        assert_eq!(set1.union(&set2).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
     }
 
     #[test]
@@ -358,8 +484,8 @@ mod tests {
         let expected = range_set(&[10..=20, 30..=40]);
 
         // 验证操作的交换律
-        assert_eq!(set1.union(&set2).0, expected.0);
-        assert_eq!(set2.union(&set1).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
+        assert_eq!(set2.union_merge(&set1).0, expected.0);
     }
 
     #[test]
@@ -367,7 +493,7 @@ mod tests {
         let set1 = range_set(&[10..=20]);
         let set2 = range_set(&[30..=40]);
         let expected = range_set(&[10..=20, 30..=40]);
-        assert_eq!(set1.union(&set2).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
     }
 
     #[test]
@@ -375,7 +501,7 @@ mod tests {
         let set1 = range_set(&[10..=20, 50..=60]);
         let set2 = range_set(&[30..=40, 70..=80]);
         let expected = range_set(&[10..=20, 30..=40, 50..=60, 70..=80]);
-        assert_eq!(set1.union(&set2).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
     }
 
     #[test]
@@ -383,7 +509,7 @@ mod tests {
         let set1 = range_set(&[10..=20]);
         let set2 = range_set(&[21..=30]);
         let expected = range_set(&[10..=30]);
-        assert_eq!(set1.union(&set2).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
     }
 
     #[test]
@@ -391,7 +517,7 @@ mod tests {
         let set1 = range_set(&[10..=20]);
         let set2 = range_set(&[15..=25]);
         let expected = range_set(&[10..=25]);
-        assert_eq!(set1.union(&set2).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
     }
 
     #[test]
@@ -399,8 +525,8 @@ mod tests {
         let set1 = range_set(&[10..=100]);
         let set2 = range_set(&[20..=30]);
         let expected = range_set(&[10..=100]);
-        assert_eq!(set1.union(&set2).0, expected.0);
-        assert_eq!(set2.union(&set1).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
+        assert_eq!(set2.union_merge(&set1).0, expected.0);
     }
 
     #[test]
@@ -408,7 +534,7 @@ mod tests {
         let set1 = range_set(&[10..=20, 30..=40]);
         let set2 = range_set(&[10..=20, 30..=40]);
         let expected = range_set(&[10..=20, 30..=40]);
-        assert_eq!(set1.union(&set2).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
     }
 
     #[test]
@@ -420,8 +546,8 @@ mod tests {
         // [10,35] 和 [30,40] -> [10,40]
         // [60,70] 和 [65,75] -> [60,75]
         let expected = range_set(&[10..=40, 60..=75]);
-        assert_eq!(set1.union(&set2).0, expected.0);
-        assert_eq!(set2.union(&set1).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
+        assert_eq!(set2.union_merge(&set1).0, expected.0);
     }
 
     #[test]
@@ -429,8 +555,8 @@ mod tests {
         let set1 = range_set(&[0..=100]);
         let set2 = range_set(&[10..=20, 30..=40, 50..=60]);
         let expected = range_set(&[0..=100]);
-        assert_eq!(set1.union(&set2).0, expected.0);
-        assert_eq!(set2.union(&set1).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
+        assert_eq!(set2.union_merge(&set1).0, expected.0);
     }
 
     #[test]
@@ -442,7 +568,74 @@ mod tests {
         // [0,25] 和 [20,30] -> [0,30]
         // [35,45] 和 [40,50] -> [35,50]
         let expected = range_set(&[0..=30, 35..=50]);
-        assert_eq!(set1.union(&set2).0, expected.0);
-        assert_eq!(set2.union(&set1).0, expected.0);
+        assert_eq!(set1.union_merge(&set2).0, expected.0);
+        assert_eq!(set2.union_merge(&set1).0, expected.0);
+    }
+
+    #[test]
+    fn test_difference_empty() {
+        let set_a = range_set(&[10..=20]);
+        let set_b = range_set(&[]);
+        assert_eq!(set_a.difference(&set_b).0, btree_set(&[10..=20]));
+        assert_eq!(set_b.difference(&set_a).0, btree_set(&[]));
+    }
+
+    #[test]
+    fn test_difference_non_overlapping() {
+        let set_a = range_set(&[10..=20]);
+        let set_b = range_set(&[30..=40]);
+        assert_eq!(set_a.difference(&set_b).0, btree_set(&[10..=20]));
+        assert_eq!(set_b.difference(&set_a).0, btree_set(&[30..=40]));
+    }
+
+    #[test]
+    fn test_difference_b_carves_start() {
+        let set_a = range_set(&[10..=20]);
+        let set_b = range_set(&[5..=15]);
+        assert_eq!(set_a.difference(&set_b).0, btree_set(&[16..=20]));
+    }
+
+    #[test]
+    fn test_difference_b_carves_end() {
+        let set_a = range_set(&[10..=20]);
+        let set_b = range_set(&[15..=25]);
+        assert_eq!(set_a.difference(&set_b).0, btree_set(&[10..=14]));
+    }
+
+    #[test]
+    fn test_difference_b_splits_a() {
+        let set_a = range_set(&[10..=20]);
+        let set_b = range_set(&[13..=17]);
+        assert_eq!(set_a.difference(&set_b).0, btree_set(&[10..=12, 18..=20]));
+    }
+
+    #[test]
+    fn test_difference_b_contains_a() {
+        let set_a = range_set(&[10..=20]);
+        let set_b = range_set(&[5..=25]);
+        assert_eq!(set_a.difference(&set_b).0, btree_set(&[]));
+    }
+
+    #[test]
+    fn test_difference_a_contains_b() {
+        let set_a = range_set(&[0..=100]);
+        let set_b = range_set(&[20..=30]);
+        assert_eq!(set_a.difference(&set_b).0, btree_set(&[0..=19, 31..=100]));
+    }
+
+    #[test]
+    fn test_difference_multiple_holes() {
+        let set_a = range_set(&[0..=100]);
+        let set_b = range_set(&[10..=20, 40..=50, 80..=90]);
+        let expected = btree_set(&[0..=9, 21..=39, 51..=79, 91..=100]);
+        assert_eq!(set_a.difference(&set_b).0, expected);
+    }
+
+    #[test]
+    fn test_difference_b_merges_and_carves() {
+        let set_a = range_set(&[0..=50, 60..=100]);
+        let set_b = range_set(&[40..=70]); // This range in B bridges the gap in A
+        let expected = btree_set(&[0..=39, 71..=100]);
+        assert_eq!(set_a.difference(&set_b).0, expected);
     }
 }

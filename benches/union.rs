@@ -61,7 +61,7 @@ fn union_benchmark(c: &mut Criterion) {
     group.bench_function("OffsetRangeSet - Sequential Union", |b| {
         b.iter(|| {
             // 只测试 union 操作本身
-            let _ = black_box(&set1_seq_offset).union(black_box(&set2_seq_offset));
+            let _ = black_box(&set1_seq_offset).union_merge(black_box(&set2_seq_offset));
         })
     });
 
@@ -94,7 +94,7 @@ fn union_benchmark(c: &mut Criterion) {
 
     group.bench_function("OffsetRangeSet - Random Union", |b| {
         b.iter(|| {
-            let _ = black_box(&set1_rand_offset).union(black_box(&set2_rand_offset));
+            let _ = black_box(&set1_rand_offset).union_merge(black_box(&set2_rand_offset));
         })
     });
 
