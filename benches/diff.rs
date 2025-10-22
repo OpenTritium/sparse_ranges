@@ -3,7 +3,7 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::prelude::*;
 use range_set_blaze::RangeSetBlaze;
-use sparse_ranges::{OffsetRange, OffsetRangeSet};
+use sparse_ranges::{Range, RangeSet};
 
 // --- 常量定义 (保持一致) ---
 const SET_SIZE: usize = 1000;
@@ -40,13 +40,13 @@ fn difference_benchmark(c: &mut Criterion) {
 
     // --- 场景 1: 顺序范围的差集 (Sequential Difference) ---
     // 预先构建好用于测试的集合
-    let mut set_a_seq_offset = OffsetRangeSet::new();
+    let mut set_a_seq_offset = RangeSet::new();
     for &(start, end) in set_a_seq_ranges {
-        set_a_seq_offset.insert_range(&OffsetRange::new(start, end));
+        set_a_seq_offset.insert_range(&Range::new(start, end));
     }
-    let mut set_b_seq_offset = OffsetRangeSet::new();
+    let mut set_b_seq_offset = RangeSet::new();
     for &(start, end) in set_b_seq_ranges {
-        set_b_seq_offset.insert_range(&OffsetRange::new(start, end));
+        set_b_seq_offset.insert_range(&Range::new(start, end));
     }
     let set_a_seq_blaze = RangeSetBlaze::from_iter(set_a_seq_ranges.iter().map(|(s, e)| *s..=*e));
     let set_b_seq_blaze = RangeSetBlaze::from_iter(set_b_seq_ranges.iter().map(|(s, e)| *s..=*e));
@@ -66,13 +66,13 @@ fn difference_benchmark(c: &mut Criterion) {
 
     // --- 场景 2: 随机范围的差集 (Random Difference) ---
     // 预先构建好用于测试的集合
-    let mut set_a_rand_offset = OffsetRangeSet::new();
+    let mut set_a_rand_offset = RangeSet::new();
     for &(start, end) in set_a_random_ranges {
-        set_a_rand_offset.insert_range(&OffsetRange::new(start, end));
+        set_a_rand_offset.insert_range(&Range::new(start, end));
     }
-    let mut set_b_rand_offset = OffsetRangeSet::new();
+    let mut set_b_rand_offset = RangeSet::new();
     for &(start, end) in set_b_random_ranges {
-        set_b_rand_offset.insert_range(&OffsetRange::new(start, end));
+        set_b_rand_offset.insert_range(&Range::new(start, end));
     }
     let set_a_rand_blaze =
         RangeSetBlaze::from_iter(set_a_random_ranges.iter().map(|(s, e)| *s..=*e));

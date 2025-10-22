@@ -3,7 +3,7 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::prelude::*;
 use range_set_blaze::RangeSetBlaze;
-use sparse_ranges::{OffsetRange, OffsetRangeSet};
+use sparse_ranges::{Range, RangeSet};
 
 const SET_SIZE: usize = 1000;
 const RANGE_MAX: usize = 10_000;
@@ -40,9 +40,9 @@ fn insertion_benchmark(c: &mut Criterion) {
     // --- 场景 1: 顺序插入 (Sequential) ---
     group.bench_function("OffsetRangeSet - Sequential", |b| {
         b.iter(|| {
-            let mut set = OffsetRangeSet::new();
+            let mut set = RangeSet::new();
             for &(start, end) in black_box(&sequential_ranges) {
-                set.insert_range(&OffsetRange::new(start, end));
+                set.insert_range(&Range::new(start, end));
             }
         })
     });
@@ -59,9 +59,9 @@ fn insertion_benchmark(c: &mut Criterion) {
     // --- 场景 2: 反向插入 (Reverse) ---
     group.bench_function("OffsetRangeSet - Reverse", |b| {
         b.iter(|| {
-            let mut set = OffsetRangeSet::new();
+            let mut set = RangeSet::new();
             for &(start, end) in black_box(&reverse_ranges) {
-                set.insert_range(&OffsetRange::new(start, end));
+                set.insert_range(&Range::new(start, end));
             }
         })
     });
@@ -78,9 +78,9 @@ fn insertion_benchmark(c: &mut Criterion) {
     // --- 场景 3: 随机插入 (Random) ---
     group.bench_function("OffsetRangeSet - Random", |b| {
         b.iter(|| {
-            let mut set = OffsetRangeSet::new();
+            let mut set = RangeSet::new();
             for &(start, end) in black_box(&random_ranges) {
-                set.insert_range(&OffsetRange::new(start, end));
+                set.insert_range(&Range::new(start, end));
             }
         })
     });

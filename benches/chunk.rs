@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use sparse_ranges::{OffsetRange, OffsetRangeSet};
+use sparse_ranges::{Range, RangeSet};
 
 /// 场景 1: 测试处理大量离散小区间的性能。
 ///
@@ -11,9 +11,9 @@ fn bench_chunks_many_small_ranges(c: &mut Criterion) {
     let mut group = c.benchmark_group("Many Small Ranges");
 
     // 创建一个包含 1000 个小区间（长度为 6）的初始集合
-    let mut initial_set = OffsetRangeSet::new();
+    let mut initial_set = RangeSet::new();
     for i in 0..1000 {
-        initial_set.insert_range(&OffsetRange::new(i * 10, i * 10 + 5));
+        initial_set.insert_range(&Range::new(i * 10, i * 10 + 5));
     }
 
     // 设置一个足够大的块大小，以确保每个块都能收集多个小区间
@@ -42,9 +42,9 @@ fn bench_chunks_one_large_range(c: &mut Criterion) {
     let mut group = c.benchmark_group("One Large Range");
 
     // 创建一个包含单个巨大区间的集合
-    let mut initial_set = OffsetRangeSet::new();
+    let mut initial_set = RangeSet::new();
     // 100 万个元素
-    initial_set.insert_range(&OffsetRange::new(0, 1_000_000 - 1));
+    initial_set.insert_range(&Range::new(0, 1_000_000 - 1));
 
     // 设置一个较小的块大小，以强制进行大量的拆分操作
     let block_size = 128;
@@ -64,17 +64,17 @@ fn bench_chunks_one_large_range(c: &mut Criterion) {
 fn bench_chunks_mixed_ranges(c: &mut Criterion) {
     let mut group = c.benchmark_group("Mixed Ranges");
 
-    let mut initial_set = OffsetRangeSet::new();
+    let mut initial_set = RangeSet::new();
     let mut current_pos = 0;
     for i in 0..500 {
         if i % 5 == 0 {
             // 每 5 个区间，插入一个较大的区间
-            let large_range = OffsetRange::new(current_pos, current_pos + 1000);
+            let large_range = Range::new(current_pos, current_pos + 1000);
             initial_set.insert_range(&large_range);
             current_pos += 1001;
         } else {
             // 否则插入一个小区间
-            let small_range = OffsetRange::new(current_pos, current_pos + 10);
+            let small_range = Range::new(current_pos, current_pos + 10);
             initial_set.insert_range(&small_range);
             current_pos += 11;
         }

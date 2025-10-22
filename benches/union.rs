@@ -3,7 +3,7 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::prelude::*;
 use range_set_blaze::RangeSetBlaze; // 假设 RangeSetBlaze 实现了 | (BitOr) 操作符用于求并集
-use sparse_ranges::{OffsetRange, OffsetRangeSet};
+use sparse_ranges::{Range, RangeSet};
 
 // --- 常量定义 (与您的文件保持一致) ---
 const SET_SIZE: usize = 1000;
@@ -40,13 +40,13 @@ fn union_benchmark(c: &mut Criterion) {
 
     // --- 场景 1: 顺序范围的并集 (Sequential Union) ---
     // 预先构建好用于测试的集合，这部分开销不计入 benchmark
-    let mut set1_seq_offset = OffsetRangeSet::new();
+    let mut set1_seq_offset = RangeSet::new();
     for &(start, end) in set1_seq_ranges {
-        set1_seq_offset.insert_range(&OffsetRange::new(start, end));
+        set1_seq_offset.insert_range(&Range::new(start, end));
     }
-    let mut set2_seq_offset = OffsetRangeSet::new();
+    let mut set2_seq_offset = RangeSet::new();
     for &(start, end) in set2_seq_ranges {
-        set2_seq_offset.insert_range(&OffsetRange::new(start, end));
+        set2_seq_offset.insert_range(&Range::new(start, end));
     }
 
     let mut set1_seq_blaze = RangeSetBlaze::new();
@@ -74,13 +74,13 @@ fn union_benchmark(c: &mut Criterion) {
 
     // --- 场景 2: 随机范围的并集 (Random Union) ---
     // 预先构建好用于测试的集合
-    let mut set1_rand_offset = OffsetRangeSet::new();
+    let mut set1_rand_offset = RangeSet::new();
     for &(start, end) in set1_random_ranges {
-        set1_rand_offset.insert_range(&OffsetRange::new(start, end));
+        set1_rand_offset.insert_range(&Range::new(start, end));
     }
-    let mut set2_rand_offset = OffsetRangeSet::new();
+    let mut set2_rand_offset = RangeSet::new();
     for &(start, end) in set2_random_ranges {
-        set2_rand_offset.insert_range(&OffsetRange::new(start, end));
+        set2_rand_offset.insert_range(&Range::new(start, end));
     }
 
     let mut set1_rand_blaze = RangeSetBlaze::new();
