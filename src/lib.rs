@@ -1,14 +1,16 @@
 #![feature(btree_cursors)]
-#![feature(if_let_guard)]
 use std::{
     collections::BTreeMap,
     fmt,
     ops::{self, BitOr, BitOrAssign, Bound, Sub, SubAssign},
 };
-
 use thiserror::Error;
 
-/// inclusive
+/// An inclusive range defined by start and last offsets.
+///
+/// This struct represents a contiguous range of unsigned integers where both
+/// the start and end points are included in the range. It provides various
+/// utility methods for manipulating and querying ranges.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash)]
 pub struct OffsetRange {
     start: usize,
@@ -16,71 +18,129 @@ pub struct OffsetRange {
 }
 
 impl OffsetRange {
+    /// Creates a new range with the given start and last values.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - The starting offset (inclusive)
+    /// * `last` - The ending offset (inclusive)
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if `start` > `last`.
     #[inline]
     pub fn new(start: usize, last: usize) -> Self {
         debug_assert!(start <= last);
         OffsetRange { start, last }
     }
 
+    /// Returns the start offset of the range.
     #[inline]
     pub fn start(&self) -> usize {
         self.start
     }
 
+    /// Returns the last offset of the range.
     #[inline]
     pub fn last(&self) -> usize {
         self.last
     }
 
+    /// Returns the length of the range.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::OffsetRange;
+    /// let range = OffsetRange::new(5, 10);
+    /// assert_eq!(range.len(), 6);
+    /// ```
     #[inline]
     pub fn len(&self) -> usize {
         self.last - self.start + 1
     }
 
+    /// Always returns `false` because an `OffsetRange` is never empty.
+    ///
+    /// An `OffsetRange` is always considered non-empty because it represents
+    /// an inclusive range from start to last where both ends are included.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         false
     }
 
+    /// Checks if the range contains a specific offset.
+    ///
+    /// # Arguments
+    ///
+    /// * `n` - The offset to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if `n` is within the range (inclusive), `false` otherwise.
     #[inline]
     pub fn contains_n(&self, n: usize) -> bool {
         self.start <= n && n <= self.last
     }
 
-    /// 检查此范围是否 **完全包含** 另一个范围 `rhs`。
+    /// Checks if the range contains another range.
     ///
-    /// 这是一个严格的子集关系。如果 `self.contains_range(rhs)` 为 true,
-    /// 那么 `rhs` 中的所有点都必须在 `self` 中。
+    /// # Arguments
     ///
-    /// 示例: `[10, 30].contains_range(&[15, 25])` -> `true`
-    ///       `[10, 20].contains_range(&[15, 25])` -> `false`
+    /// * `other` - The range to check for containment
+    ///
+    /// # Returns
+    ///
+    /// `true` if [other.start, other.last] is completely within [self.start, self.last].
     #[inline]
     pub fn contains(&self, other: &Self) -> bool {
         self.start <= other.start && self.last >= other.last
     }
 
-    /// 检查此范围是否与另一个范围 `other` **有任何重叠**。
+    /// Checks if two ranges intersect.
     ///
-    /// 只要两个范围有至少一个共同点（包括边缘接触），此函数就返回 true。
-    /// 这是一个比 `contains_range` 更宽泛的检查。
+    /// Two ranges intersect if they share at least one common point.
     ///
-    /// 示例: `[10, 20].intersects(&[15, 25])` -> `true`
-    ///       `[10, 20].intersects(&[20, 30])` -> `true` (边缘接触)
-    ///       `[10, 20].intersects(&[30, 40])` -> `false`
+    /// # Arguments
+    ///
+    /// * `other` - The range to check for intersection
+    ///
+    /// # Returns
+    ///
+    /// `true` if the ranges intersect, `false` otherwise.
     #[inline]
     pub fn intersects(&self, other: &Self) -> bool {
         self.start <= other.last && self.last >= other.start
     }
 
+    /// Checks if two ranges intersect or are adjacent.
+    ///
+    /// Ranges are considered adjacent if one ends exactly where the other begins.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The range to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if the ranges intersect or are adjacent, `false` otherwise.
     #[inline]
     fn intersects_or_adjacent(&self, other: &Self) -> bool {
-        self.start <= other.last + 1 && self.last + 1 >= other.start
+        self.start.saturating_sub(1) <= other.last && other.start.saturating_sub(1) <= self.last
     }
 
-    /// 如果两个范围相交，则将它们合并成一个能覆盖两者的最小范围。
+    /// Attempts to merge two ranges.
     ///
-    /// 如果不相交，则返回 `None`。
-    /// 此函数依赖 `intersects()` 的结果。
+    /// If the ranges intersect or are adjacent, returns a new range that covers both.
+    /// Otherwise, returns `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The range to merge with
+    ///
+    /// # Returns
+    ///
+    /// `Some(range)` with the merged range if successful, `None` otherwise.
     #[inline]
     pub fn merge(&self, other: &Self) -> Option<Self> {
         self.intersects_or_adjacent(other).then_some({
@@ -91,8 +151,37 @@ impl OffsetRange {
     }
 }
 
-// todo range版本转换，需要处理不包含错误比如  0..0
+impl TryFrom<&ops::Range<usize>> for OffsetRange {
+    type Error = Error;
+
+    /// Attempts to create an `OffsetRange` from a standard library range.
+    ///
+    /// This conversion takes a half-open range (`start..end`) and converts it
+    /// to an inclusive range (`start..=last`).
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - The range to convert
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the range end would cause an overflow when converted
+    /// to an inclusive range (e.g., when `end` is 0 and we try to compute `end - 1`).
+    #[inline]
+    fn try_from(rng: &ops::Range<usize>) -> Result<Self, Self::Error> {
+        let start = rng.start;
+        let last = rng.end.checked_sub(1).ok_or(Error::IndexOverflow)?;
+        Ok(OffsetRange::new(start, last))
+    }
+}
+
 impl From<&ops::RangeInclusive<usize>> for OffsetRange {
+    /// Creates an `OffsetRange` from a reference to an inclusive range.
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - The inclusive range to convert
+    #[inline]
     fn from(rng: &ops::RangeInclusive<usize>) -> Self {
         Self {
             start: *rng.start(),
@@ -102,6 +191,15 @@ impl From<&ops::RangeInclusive<usize>> for OffsetRange {
 }
 
 impl From<(usize, usize)> for OffsetRange {
+    /// Creates an `OffsetRange` from a tuple of (start, last).
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - A tuple where the first element is the start and the second is the last
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if the start value is greater than the last value.
     #[inline]
     fn from(rng: (usize, usize)) -> Self {
         debug_assert!(rng.0 <= rng.1);
@@ -122,69 +220,154 @@ impl fmt::Debug for OffsetRangeSet {
     }
 }
 
+/// A set of non-overlapping inclusive ranges.
+///
+/// This data structure efficiently maintains a set of non-overlapping,
+/// inclusive ranges of unsigned integers. It automatically merges overlapping
+/// or adjacent ranges when inserting new ranges.
+///
+/// # Examples
+///
+/// ```
+/// # use sparse_ranges::{OffsetRange, OffsetRangeSet};
+/// let mut set = OffsetRangeSet::new();
+/// set.insert_range(&OffsetRange::new(0, 5));
+/// set.insert_range(&OffsetRange::new(10, 15));
+/// // The set now contains two separate ranges
+/// ```
 #[derive(Default, Clone)]
 pub struct OffsetRangeSet(BTreeMap<usize, usize>);
 
 impl OffsetRangeSet {
+    /// Creates a new, empty `OffsetRangeSet`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::OffsetRangeSet;
+    /// let set = OffsetRangeSet::new();
+    /// assert!(set.is_empty());
+    /// ```
     pub fn new() -> Self {
         Default::default()
     }
 
+    /// Returns the total number of offsets covered by all ranges in the set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{OffsetRange, OffsetRangeSet};
+    /// let mut set = OffsetRangeSet::new();
+    /// set.insert_range(&OffsetRange::new(0, 5));  // 6 offsets
+    /// set.insert_range(&OffsetRange::new(10, 12)); // 3 offsets
+    /// assert_eq!(set.len(), 9);
+    /// ```
+    #[inline]
     pub fn len(&self) -> usize {
         self.0.iter().map(|(start, last)| last - start + 1).sum()
     }
 
+    /// Checks if the set is empty.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the set contains no ranges, `false` otherwise.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    /// Checks if the set contains a specific offset.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset` - The offset to check for containment
+    ///
+    /// # Returns
+    ///
+    /// `true` if the offset is covered by any range in the set, `false` otherwise.
+    #[inline]
     pub fn contains_n(&self, offset: usize) -> bool {
-        // 使用 BTreeMap::range 高效查找
         if let Some((_, last)) = self.0.range(..=offset).next_back() {
             return offset <= *last;
         }
         false
     }
 
-    /// 检查一个完整的 OffsetRange 是否被集合完全覆盖。
-    pub fn contains_range(&self, range: &OffsetRange) -> bool {
+    /// Checks if the set contains a specific range.
+    ///
+    /// # Arguments
+    ///
+    /// * `range` - The range to check for containment
+    ///
+    /// # Returns
+    ///
+    /// `true` if the entire range is covered by ranges in the set, `false` otherwise.
+    #[inline]
+    pub fn contains(&self, range: &OffsetRange) -> bool {
         if let Some((_, last)) = self.0.range(..=range.start).next_back() {
             return range.last <= *last;
         }
         false
     }
 
+    /// Inserts a range into the set.
+    ///
+    /// If the range overlaps or is adjacent to existing ranges, they will be merged.
+    /// If the range is already fully contained in the set, nothing is changed.
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - The range to insert
+    ///
+    /// # Returns
+    ///
+    /// `true` if the set was modified, `false` if the range was already fully contained.
+    ///
+    /// # Safety
+    ///
+    /// This method uses `unsafe` internally for performance optimization. The safety
+    /// invariants are maintained by ensuring that the cursor operations are valid
+    /// based on the preceding checks.
     pub fn insert_range(&mut self, rng: &OffsetRange) -> bool {
-        // 定位光标到可能与 rng 相交的第一个位置
+        // Position the cursor at the first position that might intersect with rng
         let mut cursor = self.0.upper_bound_mut(Bound::Included(&rng.start));
         if let Some(prev) = cursor.peek_prev().map(|(l, r)| OffsetRange::from((*l, *r)))
             && prev.intersects_or_adjacent(rng)
         {
             cursor.prev();
         }
-        // 检查是否为无操作（真包含或包含）
-        // 我们只需要检查光标当前位置的下一个元素。
-        // 如果这个元素（第一个可能与之相交的元素）已经包含了新范围，
-        // 那么插入就是一个无操作，直接返回 false。
+        // Check if this is a no-op (containment)
+        // We only need to check the element at the current cursor position.
+        // If that element (the first one that might intersect) already contains
+        // the new range, then the insertion is a no-op, so return false.
         if let Some(next) = cursor.peek_next().map(|(l, r)| OffsetRange::from((*l, *r)))
             && next.contains(rng)
         {
             return false;
         }
-        // 如果不是无操作，则执行合并/插入逻辑
-        // 因为我们已经排除了被完全包含的情况，任何后续操作都必然会修改集合
+        // If it's not a no-op, perform the merge/insertion logic
+        // Since we've excluded the fully contained case, any subsequent operations
+        // will necessarily modify the set
         let mut merged_rng = *rng;
-        // 只要下一个元素存在(peek_next)并且(map_or)与我们的范围相交，就继续循环
+        // Continue looping as long as the next element exists and intersects with our range
         while cursor
             .peek_next()
             .map(|(l, r)| OffsetRange::from((*l, *r)))
             .is_some_and(|next| merged_rng.intersects_or_adjacent(&next))
         {
+            // SAFETY: We've confirmed `peek_next()` returns `Some` in the loop condition,
+            // so calling `remove_next()` will not panic. Using `unwrap_unchecked` is a
+            // micro-optimization to avoid a redundant check.
             let rng_to_merge: OffsetRange =
                 unsafe { cursor.remove_next().unwrap_unchecked().into() };
+            // SAFETY: The loop condition `intersects_or_adjacent` guarantees that `merge`
+            // will return `Some`, so this unwrap is safe.
             merged_rng = unsafe { merged_rng.merge(&rng_to_merge).unwrap_unchecked() };
         }
         unsafe {
+            // safety:
             cursor
                 .insert_after(merged_rng.start, merged_rng.last)
                 .unwrap_unchecked()
@@ -192,67 +375,91 @@ impl OffsetRangeSet {
         true
     }
 
+    /// Computes the union of two sets by merging all ranges.
+    ///
+    /// This method merges ranges from both sets, creating a new set that contains
+    /// all ranges from both input sets.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The other set to union with
+    ///
+    /// # Returns
+    ///
+    /// A new `OffsetRangeSet` containing the union of both sets.
     #[must_use]
     pub fn union_merge(&self, other: &Self) -> Self {
         let mut result = BTreeMap::new();
         let mut self_it = self.0.iter().peekable();
         let mut other_it = other.0.iter().peekable();
 
-        // 存储当前正在构建的、可能还会继续扩大的范围。
+        // Store the current range being built that might still be expanded.
         let mut cur_merged: Option<OffsetRange> = None;
 
-        // 使用无限循环，并在内部处理所有情况，包括终止条件。
+        // Use an infinite loop, and handle all cases including termination conditions inside.
         loop {
-            // 从两个迭代器的头部选择 'start' 值最小的范围作为下一个处理对象。
-            // 这个 match 结构清晰地处理了所有情况，并自然地包含了循环的退出点。
+            // From the heads of both iterators, select the range with the smaller 'start' value
+            // as the next one to process.
+            // This match structure cleanly handles all cases and naturally includes the loop exit point.
             let next_rng_tuple = unsafe {
                 match (self_it.peek(), other_it.peek()) {
-                    // 两个迭代器都有元素，选择起始点更早的那个。
+                    // Both iterators have elements, select the one with the earlier start.
                     (Some((ls, _)), Some((rs, _))) => {
                         if ls <= rs {
-                            self_it.next().unwrap_unchecked() // 安全：因为 peek() 返回 Some
+                            self_it.next().unwrap_unchecked() // Safe: we know peek() returned Some
                         } else {
                             other_it.next().unwrap_unchecked()
                         }
                     }
-                    // 只有 self_iter 有元素，取之。
+                    // Only self_iter has elements, take it.
                     (Some(_), None) => self_it.next().unwrap_unchecked(),
-                    // 只有 other_iter 有元素，取之。
+                    // Only other_iter has elements, take it.
                     (None, Some(_)) => other_it.next().unwrap_unchecked(),
-                    // 两个迭代器都已耗尽，合并过程结束。
+                    // Both iterators exhausted, merge process complete.
                     (None, None) => break,
                 }
             };
-            // 将元组转换为我们的范围类型
+            // Convert the tuple to our range type
             let next_rng = OffsetRange::new(*next_rng_tuple.0, *next_rng_tuple.1);
             match cur_merged.as_mut() {
-                // Case 1: 这是第一个范围，或者我们刚完成了一个合并间隙。
-                // 直接将 next_range 作为新的合并起点。
+                // This is the first range, or we just completed a merge gap.
+                // Directly make next_range the new merge starting point.
                 None => {
                     cur_merged = Some(next_rng);
                 }
-                // Case 2: 当前有一个正在合并的范围。
+                // There's a range currently being merged.
                 Some(merged) if merged.intersects_or_adjacent(&next_rng) => {
-                    // 新范围与当前合并的范围重叠或相邻，扩大 `merged` 的边界。
-                    // 直接修改，因为 `as_mut()` 提供了可变引用。
+                    // The new range overlaps or is adjacent to the current merged range, expand `merged`'s bounds.
+                    // Modify directly since `as_mut()` provides a mutable reference.
                     merged.last = merged.last.max(next_rng.last);
                 }
                 Some(merged) => {
-                    // 新范围与当前合并的范围有间隙。
-                    // 1. 说明 `merged` 已经构建完毕，将其存入结果集。
+                    // The new range has a gap from the current merged range.
+                    // This means `merged` is complete, store it in the result set.
                     result.insert(merged.start, merged.last);
-                    // 2. 将 `next_range` 作为新的合并起点。
+                    // Make `next_range` the new merge starting point.
                     *merged = next_rng;
                 }
             }
         }
-        // 循环结束后，最后一个正在进行的 `current_merged` 还没有被存入结果集。
+        // After the loop, the last `current_merged` hasn't been stored in the result set yet.
         if let Some(last_rng) = cur_merged {
             result.insert(last_rng.start, last_rng.last);
         }
         OffsetRangeSet(result)
     }
 
+    /// Computes the union of two sets.
+    ///
+    /// This method chooses the most efficient algorithm based on the sizes of the sets.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The other set to union with
+    ///
+    /// # Returns
+    ///
+    /// A new `OffsetRangeSet` containing the union of both sets.
     #[must_use]
     #[inline]
     pub fn union(&self, other: &Self) -> Self {
@@ -277,6 +484,11 @@ impl OffsetRangeSet {
         }
     }
 
+    /// Performs union operation and assigns the result to self.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The other set to union with
     #[inline]
     fn union_assign(&mut self, other: &Self) {
         if self.0.is_empty() {
@@ -298,6 +510,18 @@ impl OffsetRangeSet {
         }
     }
 
+    /// Computes the difference of two sets.
+    ///
+    /// Returns a new set containing all elements in `self` that are not in `other`.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The set to subtract
+    ///
+    /// # Returns
+    ///
+    /// A new `OffsetRangeSet` containing the difference.
+    #[must_use]
     pub fn difference(&self, other: &Self) -> Self {
         if self.0.is_empty() || other.0.is_empty() {
             return self.clone();
@@ -307,27 +531,27 @@ impl OffsetRangeSet {
         let mut a_iter = self.0.iter();
         let mut b_iter = other.0.iter().peekable();
 
-        // 从 A 中获取第一个范围
+        // Get the first range from A
         let mut current_a = match a_iter.next() {
             Some((&start, &last)) => OffsetRange::new(start, last),
-            None => return result, // A 是空的
+            None => return result, // A is empty
         };
 
         loop {
-            // 查看 B 的下一个范围
+            // Look at B's next range
             match b_iter.peek() {
-                // Case 1: B 中还有范围
+                // B still has ranges
                 Some(&(&b_start, &b_last)) => {
                     let b_range = OffsetRange::new(b_start, b_last);
 
-                    // 如果 b_range 完全在 current_a 之前，跳过这个 b_range
+                    // If b_range is completely before current_a, skip this b_range
                     if b_range.last() < current_a.start() {
-                        b_iter.next(); // 消耗掉 b_range
+                        b_iter.next(); // Consume b_range
                         continue;
                     }
 
-                    // 如果 b_range 完全在 current_a 之后，说明 current_a 不会再被裁剪
-                    // 完成对 current_a 的处理，然后尝试从 A 获取下一个
+                    // If b_range is completely after current_a, current_a won't be trimmed further
+                    // Complete processing of current_a, then try to get the next from A
                     if b_range.start() > current_a.last() {
                         result.insert_range(&current_a);
                         if let Some((&s, &l)) = a_iter.next() {
@@ -337,46 +561,54 @@ impl OffsetRangeSet {
                             break;
                         }
                     }
-                    // 如果 b_range 在 current_a 的前面留下了一部分
+                    // If b_range leaves a part before it in current_a
                     if b_range.start() > current_a.start() {
                         let prefix = OffsetRange::new(current_a.start(), b_range.start() - 1);
                         result.insert_range(&prefix);
                     }
-                    // 更新 current_a 的起点，跳过被 b_range 覆盖的部分
-                    // 如果 b_range.last() 溢出了，说明 current_a 被完全覆盖
+                    // Update current_a's start, skipping the part covered by b_range
+                    // If b_range.last() overflows, it means current_a is completely covered
                     if let Some(new_start) = b_range.last().checked_add(1) {
-                        // 如果 new_start 已经超出了 current_a 的范围
+                        // If new_start is beyond current_a's range
                         if new_start > current_a.last() {
-                            // current_a 被完全处理完毕，获取下一个
+                            // current_a is completely processed, get the next one
                             current_a = match a_iter.next() {
                                 Some((&s, &l)) => OffsetRange::new(s, l),
-                                None => break, // A 耗尽，结束
+                                None => break, // A exhausted, end
                             };
                         } else {
-                            // current_a 还有剩余，更新起点继续处理
+                            // current_a still has remainder, update start and continue processing
                             current_a = OffsetRange::new(new_start, current_a.last());
                         }
                     } else {
-                        // b_range.last() 是 usize::MAX，current_a 之后不可能还有剩余
+                        // b_range.last() is usize::MAX, no remainder possible after current_a
                         current_a = match a_iter.next() {
                             Some((&s, &l)) => OffsetRange::new(s, l),
-                            None => break, // A 耗尽，结束
+                            None => break, // A exhausted, end
                         };
                     }
                 }
-                // Case 2: B 已经耗尽，A 中所有剩余的范围都属于结果
+                // B is exhausted, all remaining ranges in A belong to the result
                 None => {
                     result.insert_range(&current_a);
                     for (&start, &last) in a_iter {
                         result.insert_range(&OffsetRange::new(start, last));
                     }
-                    break; // 结束主循环
+                    break; // End main loop
                 }
             }
         }
         result
     }
 
+    /// Performs difference operation and assigns the result to self.
+    ///
+    /// Subtracts [other] from [self] and stores the result in [self].
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The set to subtract
+    #[inline]
     pub fn difference_assign(&mut self, other: &OffsetRangeSet) {
         if self.0.is_empty() || other.0.is_empty() {
             return;
@@ -386,6 +618,7 @@ impl OffsetRangeSet {
 }
 
 impl BitOrAssign<&OffsetRangeSet> for OffsetRangeSet {
+    /// Performs the `|=` operation, equivalent to [union_assign].
     #[inline]
     fn bitor_assign(&mut self, rhs: &OffsetRangeSet) {
         self.union_assign(rhs);
@@ -394,6 +627,8 @@ impl BitOrAssign<&OffsetRangeSet> for OffsetRangeSet {
 
 impl BitOr<&OffsetRangeSet> for OffsetRangeSet {
     type Output = OffsetRangeSet;
+
+    /// Performs the `|` operation, equivalent to [union].
     #[inline]
     fn bitor(self, rhs: &OffsetRangeSet) -> Self::Output {
         self.union(rhs)
@@ -401,6 +636,7 @@ impl BitOr<&OffsetRangeSet> for OffsetRangeSet {
 }
 
 impl SubAssign<&OffsetRangeSet> for OffsetRangeSet {
+    /// Performs the `-=` operation, equivalent to [difference_assign].
     #[inline]
     fn sub_assign(&mut self, rhs: &OffsetRangeSet) {
         self.difference_assign(rhs);
@@ -409,35 +645,46 @@ impl SubAssign<&OffsetRangeSet> for OffsetRangeSet {
 
 impl Sub<&OffsetRangeSet> for OffsetRangeSet {
     type Output = OffsetRangeSet;
+
+    /// Performs the `-` operation, equivalent to [difference].
     #[inline]
     fn sub(self, rhs: &OffsetRangeSet) -> Self::Output {
         self.difference(rhs)
     }
 }
 
-#[derive(Debug)]
-pub struct RangeChunkMut<'a> {
-    pub start: usize,
-    pub last: &'a mut usize,
-}
-
-impl RangeChunkMut<'_> {
-    pub fn len(&self) -> usize {
-        *self.last - self.start + 1
-    }
-
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        false
-    }
-}
-
+/// An iterator that chunks an `OffsetRangeSet` into fixed-size blocks.
+///
+/// This iterator consumes an `OffsetRangeSet` and produces chunks of ranges
+/// where each chunk has approximately the specified block size.
 pub struct ChunkedMutIter<'a> {
     inner: &'a mut OffsetRangeSet,
     block_size: usize,
 }
 
 impl OffsetRangeSet {
+    /// Creates a chunking iterator over the set.
+    ///
+    /// This method creates an iterator that consumes the set and produces
+    /// chunks of ranges with a specified maximum size.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_size` - The target size for each chunk
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if `block_size` is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{OffsetRange, OffsetRangeSet};
+    /// let mut set = OffsetRangeSet::new();
+    /// set.insert_range(&OffsetRange::new(0, 100));
+    /// let mut chunks = set.into_chunks(10);
+    /// // Process chunks...
+    /// ```
     pub fn into_chunks(&mut self, block_size: usize) -> ChunkedMutIter<'_> {
         debug_assert!(block_size > 0, "block_size must be greater than 0");
         ChunkedMutIter {
@@ -450,6 +697,16 @@ impl OffsetRangeSet {
 impl Iterator for ChunkedMutIter<'_> {
     type Item = Box<[OffsetRange]>;
 
+    /// Produces the next chunk of ranges.
+    ///
+    /// This method consumes ranges from the underlying set and produces
+    /// a boxed slice of ranges with a total size approximately equal
+    /// to the configured block size.
+    ///
+    /// # Returns
+    ///
+    /// A boxed slice of ranges representing the next chunk, or `None`
+    /// if the set has been fully consumed.
     fn next(&mut self) -> Option<Self::Item> {
         if self.inner.0.is_empty() {
             return None;
@@ -457,35 +714,35 @@ impl Iterator for ChunkedMutIter<'_> {
         let mut chunk_rngs = Vec::with_capacity(1);
         let mut remaining_size = self.block_size;
         while remaining_size > 0 {
-            // 首先，窥视一下第一个区间是什么，但不立即移除它
+            // First, peek at what the first range is, but don't remove it yet
             let Some((&start, &last)) = self.inner.0.first_key_value() else {
-                // 如果 BTreeMap 在循环中变空了，就跳出
+                // If the BTreeMap becomes empty during the loop, break out
                 break;
             };
             let cur_rng_len = last - start + 1;
             if cur_rng_len <= remaining_size {
-                // --- 当前区间可以被完全放入块中 ---
-                // 从 BTreeMap 中移除这个区间
+                // --- The current range can be fully included in the chunk ---
+                // Remove this range from the BTreeMap
                 self.inner.0.pop_first();
-                // 将其添加到当前块
+                // Add it to the current chunk
                 chunk_rngs.push(OffsetRange::new(start, last));
-                // 更新块的剩余容量
+                // Update the chunk's remaining capacity
                 remaining_size -= cur_rng_len;
             } else {
-                // --- 当前区间太大，只能放一部分 ---
-                // 计算这个块能容纳的此区间的结束位置
+                // --- The current range is too large, only part of it fits ---
+                // Calculate the end position that this chunk can accommodate from this range
                 let chunk_last = start + remaining_size - 1;
-                // 将这部分添加到块中
+                // Add that part to the chunk
                 chunk_rngs.push(OffsetRange::new(start, chunk_last));
-                // 所以我们移除旧的条目，然后插入一个代表剩余部分的新条目。
+                // So we remove the old entry, then insert a new entry representing the remainder.
                 let original_last = self.inner.0.pop_first().unwrap().1;
                 self.inner.0.insert(chunk_last + 1, original_last);
-                // 块现在已经被填满了，强制结束循环
+                // The chunk is now full, force the loop to end
                 remaining_size = 0;
             }
         }
-        // 如果我们成功地从 BTreeMap 中获取了任何数据，
-        // 就返回构建好的块，否则返回 None。
+        // If we successfully got any data from the BTreeMap,
+        // return the constructed chunk, otherwise return None.
         if chunk_rngs.is_empty() {
             None
         } else {
@@ -495,6 +752,16 @@ impl Iterator for ChunkedMutIter<'_> {
 }
 
 impl<T: Into<OffsetRange>> FromIterator<T> for OffsetRangeSet {
+    /// Creates an `OffsetRangeSet` from an iterator.
+    ///
+    /// # Arguments
+    ///
+    /// * `iter` - An iterator of items that can be converted to `OffsetRange`
+    ///
+    /// # Returns
+    ///
+    /// A new `OffsetRangeSet` containing all the ranges from the iterator.
+    #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut set = OffsetRangeSet::new();
         for item in iter {
@@ -504,36 +771,110 @@ impl<T: Into<OffsetRange>> FromIterator<T> for OffsetRangeSet {
     }
 }
 
-#[derive(Debug, Error)]
+/// Error types that can occur when working with range sets.
+#[derive(Debug, Error, PartialEq)]
 pub enum Error {
+    /// An error occurred when parsing a range header.
+    #[cfg(feature = "http")]
     #[error(transparent)]
     Header(#[from] http_range_header::RangeUnsatisfiableError),
-    #[error("unsupported range unit")]
-    Unsupported,
+    #[error("invalid range unit")]
+    Invalid,
+    #[error("index overflow")]
+    IndexOverflow,
+    #[error("empty ranges")]
+    Empty,
 }
 
+#[cfg(feature = "http")]
 impl OffsetRangeSet {
-    pub fn parse_ranges_headers(header_content: &str) -> Result<OffsetRangeSet, Error> {
+    /// Parses an HTTP 'Range' header string relative to a total entity size.
+    ///
+    /// This function correctly handles all valid range formats, including:
+    /// - `bytes=0-499` (absolute range)
+    /// - `bytes=500-` (open-ended range)
+    /// - `bytes=-100` (suffix range)
+    ///
+    /// It returns a `RangeUnsatisfiableError` if any calculated range is invalid
+    /// with respect to the `total_size`, as per RFC 7233.
+    pub fn parse_ranges_headers(
+        header_content: &str,
+        total_size: usize,
+    ) -> Result<OffsetRangeSet, Error> {
         use http_range_header::{EndPosition, StartPosition};
+        if total_size == 0 {
+            // According to RFC 7233, a range header on a zero-length entity
+            // is always unsatisfiable.
+            return Err(Error::Empty);
+        }
+
         let mut set = OffsetRangeSet::new();
+        // The library already handles parsing the string format.
         let rngs = http_range_header::parse_range_header(header_content)?.ranges;
+
         for item in rngs {
-            let start = if let StartPosition::Index(n) = item.start {
-                n as usize
-            } else {
-                return Err(Error::Unsupported);
+            let (start, last) = match (item.start, item.end) {
+                // `bytes=A-B` (e.g., `bytes=0-499`)
+                (StartPosition::Index(s), EndPosition::Index(l)) => (s as usize, l as usize),
+                // `bytes=A-` (e.g., `bytes=500-`)
+                (StartPosition::Index(s), EndPosition::LastByte) => {
+                    let start = s as usize;
+                    if start >= total_size {
+                        return Err(Error::Invalid);
+                    }
+                    (start, total_size - 1)
+                },
+                // `bytes=-C` (e.g., `bytes=-100`)
+                (StartPosition::FromLast(c), EndPosition::LastByte) => {
+                    // `-0`: Suffix length cannot be 0.
+                    if c == 0 {
+                        return Err(Error::Empty);
+                    }
+                    // Calculate start, avoiding underflow if c > total_size.
+                    let s = total_size.saturating_sub(c as usize);
+                    (s, total_size - 1)
+                }
+                (StartPosition::FromLast(_), EndPosition::Index(_)) => return Err(Error::Invalid),
             };
-            let last = if let EndPosition::Index(n) = item.end {
-                n as usize
-            } else {
-                return Err(Error::Unsupported);
-            };
-            set.insert_range(&OffsetRange::new(start, last));
+
+            // --- Validation as per RFC 7233 ---
+            // "If the last-byte-pos value is present, it MUST be greater than or
+            // equal to the first-byte-pos in that byte-range-spec."
+            if start > last {
+                return Err(Error::Invalid);
+            }
+
+            // "if the first-byte-pos of all of the byte-range-spec values
+            // is greater than or equal to the current length of the representation,
+            // the server SHOULD send a 416 (Range Not Satisfiable) response."
+            // We check this for each range.
+            if start >= total_size {
+                return Err(Error::Invalid);
+            }
+
+            // The range is valid, but we need to clamp `last` to the actual size.
+            // For example, a request for `0-1000` on a 500-byte file should yield `0-499`.
+            let last_clamped: usize = last.min(total_size - 1);
+            set.insert_range(&OffsetRange::new(start, last_clamped));
+        }
+        // If after all processing the set is empty (e.g., all ranges were invalid
+        // in a way that didn't trigger an early return, although unlikely with current logic),
+        // it might also be considered unsatisfiable.
+        if set.is_empty() {
+            return Err(Error::Empty);
         }
         Ok(set)
     }
 
-    pub fn as_http_range_header_string(&self) -> Option<Box<str>> {
+    /// Converts the set to an HTTP range header string.
+    ///
+    /// # Returns
+    ///
+    /// A boxed string representing the ranges in HTTP header format (e.g., "bytes=0-100,200-300"),
+    /// or `None` if the set is empty.
+    #[inline]
+    #[must_use]
+    pub fn as_http_range_header(&self) -> Option<Box<str>> {
         if self.0.is_empty() {
             return None;
         }
@@ -548,7 +889,7 @@ impl OffsetRangeSet {
 
 #[cfg(test)]
 mod tests {
-    use crate::{OffsetRange, OffsetRangeSet};
+    use crate::{Error, OffsetRange, OffsetRangeSet};
     use std::{collections::BTreeMap, ops::RangeInclusive};
 
     fn btree_set(ranges: &[RangeInclusive<usize>]) -> BTreeMap<usize, usize> {
@@ -556,6 +897,112 @@ mod tests {
             .iter()
             .map(|rng| (*rng.start(), *rng.end()))
             .collect()
+    }
+
+    #[test]
+    fn test_offset_range_new() {
+        let range = OffsetRange::new(5, 10);
+        assert_eq!(range.start(), 5);
+        assert_eq!(range.last(), 10);
+        assert_eq!(range.len(), 6);
+    }
+
+    #[test]
+    fn test_offset_range_contains_n() {
+        let range = OffsetRange::new(5, 10);
+        assert!(range.contains_n(5));
+        assert!(range.contains_n(7));
+        assert!(range.contains_n(10));
+        assert!(!range.contains_n(4));
+        assert!(!range.contains_n(11));
+    }
+
+    #[test]
+    fn test_offset_range_contains() {
+        let range = OffsetRange::new(5, 10);
+        assert!(range.contains(&OffsetRange::new(5, 10))); // Same range
+        assert!(range.contains(&OffsetRange::new(6, 9))); // Strictly inside
+        assert!(!range.contains(&OffsetRange::new(4, 10))); // Extends before
+        assert!(!range.contains(&OffsetRange::new(5, 11))); // Extends after
+        assert!(!range.contains(&OffsetRange::new(3, 4))); // Completely before
+        assert!(!range.contains(&OffsetRange::new(11, 12))); // Completely after
+    }
+
+    #[test]
+    fn test_offset_range_intersects() {
+        let range = OffsetRange::new(5, 10);
+        assert!(range.intersects(&OffsetRange::new(5, 10))); // Same range
+        assert!(range.intersects(&OffsetRange::new(3, 7))); // Overlaps start
+        assert!(range.intersects(&OffsetRange::new(8, 12))); // Overlaps end
+        assert!(range.intersects(&OffsetRange::new(3, 12))); // Contains range
+        assert!(range.intersects(&OffsetRange::new(6, 9))); // Contained in range
+        assert!(!range.intersects(&OffsetRange::new(2, 4))); // Completely before
+        assert!(!range.intersects(&OffsetRange::new(11, 15))); // Completely after
+    }
+
+    #[test]
+    fn test_offset_range_intersects_or_adjacent() {
+        let range = OffsetRange::new(5, 10);
+        assert!(range.intersects_or_adjacent(&OffsetRange::new(5, 10))); // Same range
+        assert!(range.intersects_or_adjacent(&OffsetRange::new(3, 7))); // Overlaps start
+        assert!(range.intersects_or_adjacent(&OffsetRange::new(8, 12))); // Overlaps end
+        assert!(range.intersects_or_adjacent(&OffsetRange::new(3, 12))); // Contains range
+        assert!(range.intersects_or_adjacent(&OffsetRange::new(6, 9))); // Contained in range
+        assert!(range.intersects_or_adjacent(&OffsetRange::new(2, 4))); // Adjacent before
+        assert!(range.intersects_or_adjacent(&OffsetRange::new(11, 15))); // Adjacent after
+        assert!(!range.intersects_or_adjacent(&OffsetRange::new(1, 3))); // Separated before
+        assert!(!range.intersects_or_adjacent(&OffsetRange::new(12, 15))); // Separated after
+    }
+
+    #[test]
+    fn test_offset_range_merge() {
+        let range = OffsetRange::new(5, 10);
+
+        // Merge with overlapping range
+        assert_eq!(
+            range.merge(&OffsetRange::new(8, 15)),
+            Some(OffsetRange::new(5, 15))
+        );
+
+        // Merge with adjacent range (after)
+        assert_eq!(
+            range.merge(&OffsetRange::new(11, 15)),
+            Some(OffsetRange::new(5, 15))
+        );
+
+        // Merge with adjacent range (before)
+        assert_eq!(
+            range.merge(&OffsetRange::new(1, 4)),
+            Some(OffsetRange::new(1, 10))
+        );
+
+        // Cannot merge with separated range
+        assert_eq!(range.merge(&OffsetRange::new(12, 15)), None);
+    }
+
+    #[test]
+    fn test_offset_range_try_from_range() {
+        // Valid range
+        let range: Result<OffsetRange, _> = (&(5..11)).try_into();
+        assert_eq!(range, Ok(OffsetRange::new(5, 10)));
+
+        // Test with a range that would cause underflow when converting to inclusive (end == 0)
+        let range: Result<OffsetRange, _> = (&(0..0)).try_into();
+        assert!(range.is_err());
+        assert!(matches!(range.unwrap_err(), Error::IndexOverflow));
+    }
+
+    #[test]
+    fn test_offset_range_from_range_inclusive() {
+        let std_range = 5..=10;
+        let range = OffsetRange::from(&std_range);
+        assert_eq!(range, OffsetRange::new(5, 10));
+    }
+
+    #[test]
+    fn test_offset_range_from_tuple() {
+        let range = OffsetRange::from((5, 10));
+        assert_eq!(range, OffsetRange::new(5, 10));
     }
 
     #[test]
@@ -689,6 +1136,177 @@ mod tests {
     }
 
     #[test]
+    fn test_offset_range_set_new() {
+        let set = OffsetRangeSet::new();
+        assert!(set.is_empty());
+        assert_eq!(set.len(), 0);
+    }
+
+    #[test]
+    fn test_offset_range_set_len() {
+        let mut set = OffsetRangeSet::new();
+        assert_eq!(set.len(), 0);
+
+        set.insert_range(&OffsetRange::new(0, 5)); // 6 elements
+        assert_eq!(set.len(), 6);
+
+        set.insert_range(&OffsetRange::new(10, 12)); // 3 more elements
+        assert_eq!(set.len(), 9);
+
+        set.insert_range(&OffsetRange::new(3, 11)); // Merge all into one range (0-12) = 13 elements
+        assert_eq!(set.len(), 13);
+    }
+
+    #[test]
+    fn test_offset_range_set_contains_n() {
+        let mut set = OffsetRangeSet::new();
+        set.insert_range(&OffsetRange::new(5, 10));
+        set.insert_range(&OffsetRange::new(15, 20));
+
+        // Test elements in ranges
+        assert!(set.contains_n(5));
+        assert!(set.contains_n(10));
+        assert!(set.contains_n(15));
+        assert!(set.contains_n(20));
+
+        // Test elements between ranges
+        assert!(!set.contains_n(11));
+        assert!(!set.contains_n(14));
+
+        // Test elements outside ranges
+        assert!(!set.contains_n(4));
+        assert!(!set.contains_n(21));
+    }
+
+    #[test]
+    fn test_offset_range_set_contains() {
+        let mut set = OffsetRangeSet::new();
+        set.insert_range(&OffsetRange::new(5, 10));
+        set.insert_range(&OffsetRange::new(15, 20));
+
+        // Test ranges fully contained
+        assert!(set.contains(&OffsetRange::new(5, 10)));
+        assert!(set.contains(&OffsetRange::new(15, 20)));
+        assert!(set.contains(&OffsetRange::new(6, 9)));
+        assert!(set.contains(&OffsetRange::new(16, 19)));
+
+        // Test ranges partially contained
+        assert!(!set.contains(&OffsetRange::new(4, 6)));
+        assert!(!set.contains(&OffsetRange::new(9, 11)));
+        assert!(!set.contains(&OffsetRange::new(14, 16)));
+        assert!(!set.contains(&OffsetRange::new(19, 21)));
+
+        // Test ranges not contained at all
+        assert!(!set.contains(&OffsetRange::new(11, 14)));
+        assert!(!set.contains(&OffsetRange::new(2, 4)));
+        assert!(!set.contains(&OffsetRange::new(21, 25)));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_parse_ranges_headers_valid() {
+        // Test absolute range
+        let set = OffsetRangeSet::parse_ranges_headers("bytes=0-499", 1000).unwrap();
+        assert_eq!(set.len(), 500);
+        assert!(set.contains_n(0));
+        assert!(set.contains_n(499));
+        assert!(!set.contains_n(500));
+
+        // Test open-ended range
+        let set = OffsetRangeSet::parse_ranges_headers("bytes=500-", 1000).unwrap();
+        assert_eq!(set.len(), 500);
+        assert!(set.contains_n(500));
+        assert!(set.contains_n(999));
+        assert!(!set.contains_n(499));
+
+        // Test suffix range
+        let set = OffsetRangeSet::parse_ranges_headers("bytes=-100", 1000).unwrap();
+        assert_eq!(set.len(), 100);
+        assert!(set.contains_n(900));
+        assert!(set.contains_n(999));
+        assert!(!set.contains_n(899));
+
+        // Test multiple ranges
+        let set = OffsetRangeSet::parse_ranges_headers("bytes=0-5,10-15", 1000).unwrap();
+        assert_eq!(set.len(), 12);
+        assert!(set.contains_n(0));
+        assert!(set.contains_n(5));
+        assert!(!set.contains_n(6));
+        assert!(!set.contains_n(9));
+        assert!(set.contains_n(10));
+        assert!(set.contains_n(15));
+        assert!(!set.contains_n(16));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_parse_ranges_headers_invalid() {
+        // Test invalid range (start > end)
+        let result = OffsetRangeSet::parse_ranges_headers("bytes=500-400", 1000);
+        assert!(matches!(result, Err(Error::Invalid)));
+        
+        // Test invalid range (start >= total_size)
+        let result = OffsetRangeSet::parse_ranges_headers("bytes=1000-", 1000);
+        assert!(matches!(result, Err(Error::Invalid)));
+        
+        // Test invalid range (start > total_size)
+        let result = OffsetRangeSet::parse_ranges_headers("bytes=1001-2000", 1000);
+        assert!(matches!(result, Err(Error::Invalid)));
+        
+        // Test invalid format (FromLast with Index) - this is handled by the http_range_header crate
+        // and would return a Header error, not our Invalid error
+        let result = OffsetRangeSet::parse_ranges_headers("bytes=-500-600", 1000);
+        assert!(result.is_err());
+        
+        // Test empty range (-0) - this would also be handled by the http_range_header crate
+        // and would return a Header error, not our Empty error
+        let result = OffsetRangeSet::parse_ranges_headers("bytes=-0", 1000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_parse_ranges_headers_empty_entity() {
+        // Test any range on zero-length entity
+        let result = OffsetRangeSet::parse_ranges_headers("bytes=0-499", 0);
+        assert!(matches!(result, Err(Error::Empty)));
+
+        let result = OffsetRangeSet::parse_ranges_headers("bytes=500-", 0);
+        assert!(matches!(result, Err(Error::Empty)));
+
+        let result = OffsetRangeSet::parse_ranges_headers("bytes=-100", 0);
+        assert!(matches!(result, Err(Error::Empty)));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_parse_ranges_headers_clamping() {
+        // Test range clamping
+        let set = OffsetRangeSet::parse_ranges_headers("bytes=0-1000", 500).unwrap();
+        assert_eq!(set.len(), 500);
+        assert!(set.contains_n(0));
+        assert!(set.contains_n(499));
+        assert!(!set.contains_n(500));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_as_http_range_header() {
+        let mut set = OffsetRangeSet::new();
+
+        // Test empty set
+        assert_eq!(set.as_http_range_header(), None);
+
+        // Test single range
+        set.insert_range(&OffsetRange::new(0, 5));
+        assert_eq!(set.as_http_range_header(), Some("bytes=0-5".into()));
+
+        // Test multiple ranges
+        set.insert_range(&OffsetRange::new(10, 15));
+        assert_eq!(set.as_http_range_header(), Some("bytes=0-5,10-15".into()));
+    }
+
+    #[test]
     fn test_union_both_empty() {
         let set1 = range_set(&[]);
         let set2 = range_set(&[]);
@@ -792,6 +1410,31 @@ mod tests {
     }
 
     #[test]
+    fn test_union_edge_cases() {
+        // Test union with self
+        let mut set = OffsetRangeSet::new();
+        set.insert_range(&OffsetRange::new(5, 10));
+        let union = set.union(&set);
+        assert_eq!(union.len(), 6);
+        assert!(union.contains_n(5));
+        assert!(union.contains_n(10));
+
+        // Test union with overlapping sets
+        let mut set1 = OffsetRangeSet::new();
+        set1.insert_range(&OffsetRange::new(5, 15));
+
+        let mut set2 = OffsetRangeSet::new();
+        set2.insert_range(&OffsetRange::new(10, 20));
+
+        let union = set1.union(&set2);
+        assert_eq!(union.len(), 16); // 5-20
+        assert!(union.contains_n(5));
+        assert!(union.contains_n(20));
+        assert!(!union.contains_n(4));
+        assert!(!union.contains_n(21));
+    }
+
+    #[test]
     fn test_difference_empty() {
         let set_a = range_set(&[10..=20]);
         let set_b = range_set(&[]);
@@ -859,6 +1502,29 @@ mod tests {
     }
 
     #[test]
+    fn test_difference_edge_cases() {
+        // Test difference with self
+        let mut set = OffsetRangeSet::new();
+        set.insert_range(&OffsetRange::new(5, 10));
+        let difference = set.difference(&set);
+        assert!(difference.is_empty());
+        assert_eq!(difference.len(), 0);
+
+        // Test difference with non-overlapping sets
+        let mut set1 = OffsetRangeSet::new();
+        set1.insert_range(&OffsetRange::new(5, 10));
+
+        let mut set2 = OffsetRangeSet::new();
+        set2.insert_range(&OffsetRange::new(15, 20));
+
+        let difference = set1.difference(&set2);
+        assert_eq!(difference.len(), 6);
+        assert!(difference.contains_n(5));
+        assert!(difference.contains_n(10));
+        assert!(!difference.contains_n(11));
+    }
+
+    #[test]
     fn test_chunks_gathers_multiple_discrete_ranges() {
         let mut set = range_set(&[0..=10, 90..=100]); // len=11, len=11
 
@@ -913,5 +1579,35 @@ mod tests {
         // 结束
         assert!(chunks_iter.next().is_none());
         assert!(set.0.is_empty());
+    }
+
+    #[test]
+    fn test_chunks_empty_set() {
+        let mut set = OffsetRangeSet::new();
+        let mut chunks = set.into_chunks(10);
+        assert!(chunks.next().is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "block_size must be greater than 0")]
+    fn test_chunks_zero_block_size() {
+        let mut set = OffsetRangeSet::new();
+        set.insert_range(&OffsetRange::new(0, 5));
+        let mut chunks = set.into_chunks(0);
+        // This should panic due to the debug_assert! in into_chunks
+        let _ = chunks.next();
+    }
+
+    #[test]
+    fn test_chunks_exact_block_size() {
+        let mut set = OffsetRangeSet::new();
+        set.insert_range(&OffsetRange::new(0, 9)); // Exactly 10 elements
+
+        let mut chunks = set.into_chunks(10);
+        let chunk = chunks.next().unwrap();
+        assert_eq!(chunk.len(), 1);
+        assert_eq!(chunk[0], OffsetRange::new(0, 9));
+        assert!(chunks.next().is_none());
+        assert!(set.is_empty());
     }
 }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-http-range-header = "0.4.2"
+http-range-header = { version = "0.4.2", optional = true }
 thiserror = "2.0.17"
 
 [dev-dependencies]
@@ -12,6 +12,9 @@ range-set-blaze = "0.3.0"
 criterion = "0.7.0"
 rand = "0.9.2"
 
+[features]
+default = ["http"]
+http = ["dep:http-range-header"]
 
 [[bench]]
 name = "insert"
