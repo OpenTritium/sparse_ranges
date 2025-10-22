@@ -2,7 +2,7 @@
 name = "sparse_ranges"
 version = "0.1.0"
 edition = "2024"
-authors = ["The sparse_ranges Contributors"]
+authors = ["OpenTritium"]
 description = "Efficient sparse range set operations, particularly designed for HTTP range requests and file offset management"
 repository = "https://github.com/OpenTritium/sparse_ranges"
 license = "MIT"
