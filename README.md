@@ -35,16 +35,18 @@ ranges.insert_range(&Range::new(20, 30));
 
 ```rust
 use sparse_ranges::{Range, RangeSet};
+
 let mut set1 = RangeSet::new();
 set1.insert_range(&Range::new(0, 10));
+
 let mut set2 = RangeSet::new();
 set2.insert_range(&Range::new(5, 15));
 
 // Union with | operator
-let set3 = &set1 | &set2;
+let set3 = set1 | &set2;
 
 // Difference with - operator
-let diff = &set1 - &set2;
+let difference = set1 - &set2;
 
 // Union assignment with |= operator
 set1 |= &set2;
@@ -55,7 +57,7 @@ set1 -= &set2;
 
 ### Freeze
 
-Create an immutable snapshot of a range set that converts the internal BTreeMap structure to a more efficient array format:
+Create an immutable snapshot of a range set that can be shared across threads or stored for later use:
 
 ```rust
 use sparse_ranges::{Range, RangeSet};
@@ -64,25 +66,19 @@ let mut ranges = RangeSet::new();
 ranges.insert_range(&Range::new(0, 10));
 ranges.insert_range(&Range::new(20, 30));
 
-// Create an immutable snapshot with array-based storage
+// Create an immutable snapshot
 let frozen = ranges.freeze();
 
-// FrozenRangeSet uses array storage which has better cache locality
-// and provides efficient iteration while preserving all query operations
+// FrozenRangeSet can be shared between threads or stored
+// It provides efficient query operations but cannot be modified
 assert_eq!(frozen.len(), 22); // Total elements in all ranges
 assert_eq!(frozen.ranges_count(), 2); // Number of separate ranges
-
-// You can still iterate over the ranges
-for range in frozen.iter() {
-    println!("Range: {:?}", range);
-}
 ```
 
-The `freeze` operation creates a `FrozenRangeSet` which:
-- Converts the internal BTreeMap structure to an array for better cache locality
-- Provides immutable but efficient access to range data
-- Maintains all query capabilities (contains, contains_n, etc.)
-- Allows efficient iteration over the ranges
+The `freeze` operation creates a `FrozenRangeSet`, which is an immutable version of `RangeSet`. This is useful when you need to:
+- Share range data across threads (since it's immutable, it's thread-safe)
+- Store a snapshot of ranges at a particular point in time
+- Pass ranges to functions that only need to read, not modify, the data
 
 ### Chunking
 

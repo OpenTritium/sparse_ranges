@@ -1,7 +1,7 @@
 #![feature(btree_cursors)]
 use std::{
     collections::BTreeMap,
-    fmt,
+    fmt::{self, Debug},
     ops::{self, BitOr, BitOrAssign, Bound, Deref, Sub, SubAssign},
 };
 use thiserror::Error;
@@ -97,7 +97,7 @@ impl Range {
     ///
     /// # Returns
     ///
-    /// `true` if [other.start, other.last] is completely within [self.start, self.last].
+    /// `true` if `other.start..=other.last` is completely within `self.start..=self.last`.
     #[inline]
     pub fn contains(&self, other: &Self) -> bool {
         self.start <= other.start && self.last >= other.last
@@ -447,6 +447,8 @@ impl RangeSet {
     /// Computes the union of two sets.
     ///
     /// This method chooses the most efficient algorithm based on the sizes of the sets.
+    /// If one set is much smaller than the other, it inserts ranges from the smaller
+    /// set into the larger one. Otherwise, it uses the merge-based approach.
     ///
     /// # Arguments
     ///
@@ -635,6 +637,36 @@ impl RangeSet {
             .collect::<Box<[_]>>();
         FrozenRangeSet(ranges)
     }
+
+    /// Creates a chunking iterator over the set.
+    ///
+    /// This method creates an iterator that consumes the set and produces
+    /// chunks of ranges with a specified maximum size.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_size` - The target size for each chunk
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if `block_size` is zero.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{Range, RangeSet};
+    /// let mut set = RangeSet::new();
+    /// set.insert_range(&Range::new(0, 100));
+    /// let chunks: Vec<_> = set.into_chunks(10).collect();
+    /// assert_eq!(chunks.len(), 11); // 101 elements in chunks of 10
+    /// ```
+    pub fn into_chunks(&mut self, block_size: usize) -> ChunkedMutIter<'_> {
+        debug_assert!(block_size > 0, "block_size must be greater than 0");
+        ChunkedMutIter {
+            inner: self,
+            block_size,
+        }
+    }
 }
 
 impl BitOrAssign<&Self> for RangeSet {
@@ -689,38 +721,6 @@ impl fmt::Debug for RangeSet {
 pub struct ChunkedMutIter<'a> {
     inner: &'a mut RangeSet,
     block_size: usize,
-}
-
-impl RangeSet {
-    /// Creates a chunking iterator over the set.
-    ///
-    /// This method creates an iterator that consumes the set and produces
-    /// chunks of ranges with a specified maximum size.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_size` - The target size for each chunk
-    ///
-    /// # Panics
-    ///
-    /// Panics in debug builds if `block_size` is zero.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use sparse_ranges::{Range, RangeSet};
-    /// let mut set = RangeSet::new();
-    /// set.insert_range(&Range::new(0, 100));
-    /// let mut chunks = set.into_chunks(10);
-    /// // Process chunks...
-    /// ```
-    pub fn into_chunks(&mut self, block_size: usize) -> ChunkedMutIter<'_> {
-        debug_assert!(block_size > 0, "block_size must be greater than 0");
-        ChunkedMutIter {
-            inner: self,
-            block_size,
-        }
-    }
 }
 
 impl Iterator for ChunkedMutIter<'_> {
@@ -916,8 +916,18 @@ impl RangeSet {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct FrozenRangeSet(Box<[Range]>);
+
+impl Debug for FrozenRangeSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut set_builder = f.debug_set();
+        for range in self.0.iter() {
+            set_builder.entry(&(range.start()..=range.last()));
+        }
+        set_builder.finish()
+    }
+}
 
 impl Deref for FrozenRangeSet {
     type Target = [Range];
