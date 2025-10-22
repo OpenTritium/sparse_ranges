@@ -12,3 +12,9 @@ The library provides:
 - Operations like union, difference, and intersection
 - Parsing and generation of HTTP Range headers (with the `http` feature)
 - Chunking functionality for processing large ranges in smaller blocks
+
+## Requirements
+
+This library requires a nightly Rust compiler due to its use of the experimental `btree_cursors` feature from the 2024 edition. To use this library, ensure you have a recent nightly version of Rust installed.
+
+The `#![feature(btree_cursors)]` attribute is used to enable experimental APIs for working with BTreeMap cursors, which provides efficient range manipulation capabilities.
