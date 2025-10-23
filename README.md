@@ -66,19 +66,21 @@ let mut ranges = RangeSet::new();
 ranges.insert_range(&Range::new(0, 10));
 ranges.insert_range(&Range::new(20, 30));
 
-// Create an immutable snapshot
+// Create an immutable snapshot with boxed-array-based storage
 let frozen = ranges.freeze();
 
-// FrozenRangeSet can be shared between threads or stored
-// It provides efficient query operations but cannot be modified
+// FrozenRangeSet uses array storage which has better cache locality
+// and provides efficient iteration while preserving all query operations
 assert_eq!(frozen.len(), 22); // Total elements in all ranges
 assert_eq!(frozen.ranges_count(), 2); // Number of separate ranges
 ```
 
 The `freeze` operation creates a `FrozenRangeSet`, which is an immutable version of `RangeSet`. This is useful when you need to:
-- Share range data across threads (since it's immutable, it's thread-safe)
-- Store a snapshot of ranges at a particular point in time
-- Pass ranges to functions that only need to read, not modify, the data
+- Converts the internal BTreeMap structure to an array for better cache locality
+- Provides immutable but efficient access to range data
+- Maintains all query capabilities (contains, contains_n, etc.)
+- Allows efficient iteration over the ranges
+
 
 ### Chunking
 
