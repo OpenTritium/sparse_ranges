@@ -264,6 +264,21 @@ impl RangeSet {
         self.0.iter().map(|(start, last)| last - start + 1).sum()
     }
 
+    /// Returns the number of ranges in the set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{Range, RangeSet};
+    /// let mut set = RangeSet::new();
+    /// set.insert_range(&Range::new(0, 5));
+    /// set.insert_range(&Range::new(10, 12));
+    /// assert_eq!(set.ranges_count(), 2);
+    #[inline]
+    pub fn ranges_count(&self) -> usize {
+        self.0.len()
+    }
+
     /// Checks if the set is empty.
     ///
     /// # Returns
