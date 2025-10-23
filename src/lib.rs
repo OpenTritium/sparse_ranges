@@ -135,6 +135,155 @@ impl Range {
         self.start.saturating_sub(1) <= other.last && other.start.saturating_sub(1) <= self.last
     }
 
+    /// Checks if two ranges are adjacent.
+    ///
+    /// Two ranges are adjacent if one ends exactly where the other begins.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The range to check for adjacency
+    ///
+    /// # Returns
+    ///
+    /// `true` if the ranges are adjacent, `false` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::Range;
+    /// let range1 = Range::new(0, 5);
+    /// let range2 = Range::new(6, 10);
+    /// assert!(range1.is_adjacent(&range2));
+    ///
+    /// let range3 = Range::new(0, 5);
+    /// let range4 = Range::new(7, 10);
+    /// assert!(!range3.is_adjacent(&range4));
+    /// ```
+    #[inline]
+    pub fn is_adjacent(&self, other: &Self) -> bool {
+        (self.last < usize::MAX && self.last + 1 == other.start)
+            || (other.last < usize::MAX && other.last + 1 == self.start)
+    }
+
+    /// Returns the midpoint of the range.
+    ///
+    /// The midpoint is calculated as the average of start and last, rounded down.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::Range;
+    /// let range = Range::new(0, 10);
+    /// assert_eq!(range.midpoint(), 5);
+    ///
+    /// let range = Range::new(5, 8);
+    /// assert_eq!(range.midpoint(), 6);
+    /// ```
+    #[inline]
+    pub fn midpoint(&self) -> usize {
+        self.start + (self.last - self.start) / 2
+    }
+
+    /// Returns the intersection of two ranges.
+    ///
+    /// If the ranges do not intersect, returns `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The range to intersect with
+    ///
+    /// # Returns
+    ///
+    /// `Some(Range)` containing the overlapping part, or `None` if no intersection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::Range;
+    /// let range1 = Range::new(0, 10);
+    /// let range2 = Range::new(5, 15);
+    /// let intersection = range1.intersection(&range2).unwrap();
+    /// assert_eq!(intersection, Range::new(5, 10));
+    ///
+    /// let range3 = Range::new(20, 30);
+    /// assert!(range1.intersection(&range3).is_none());
+    /// ```
+    #[inline]
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        if self.intersects(other) {
+            let start = self.start.max(other.start);
+            let last = self.last.min(other.last);
+            Some(Range::new(start, last))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the difference between two ranges.
+    ///
+    /// The difference is the part of `self` that is not covered by `other`.
+    /// Returns a tuple of optional ranges representing the left and right parts.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The range to subtract
+    ///
+    /// # Returns
+    ///
+    /// A tuple `(left, right)` where:
+    /// - `left` is the part of `self` before `other` (if any)
+    /// - `right` is the part of `self` after `other` (if any)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::Range;
+    /// let range1 = Range::new(0, 10);
+    /// let range2 = Range::new(3, 7);
+    /// let (left, right) = range1.difference(&range2);
+    /// assert_eq!(left, Some(Range::new(0, 2)));
+    /// assert_eq!(right, Some(Range::new(8, 10)));
+    ///
+    /// let range3 = Range::new(0, 5);
+    /// let range4 = Range::new(2, 8);
+    /// let (left2, right2) = range3.difference(&range4);
+    /// assert_eq!(left2, Some(Range::new(0, 1)));
+    /// assert_eq!(right2, None);
+    ///
+    /// let range5 = Range::new(0, 10);
+    /// let range6 = Range::new(0, 10);
+    /// let (left3, right3) = range5.difference(&range6);
+    /// assert_eq!(left3, None);
+    /// assert_eq!(right3, None);
+    /// ```
+    pub fn difference(&self, other: &Self) -> (Option<Self>, Option<Self>) {
+        if !self.intersects(other) {
+            // No intersection, return self as the only part
+            return (Some(*self), None);
+        }
+
+        let mut left = None;
+        let mut right = None;
+
+        // Check for left part
+        if self.start < other.start {
+            let left_end = other.start.saturating_sub(1);
+            if self.start <= left_end {
+                left = Some(Range::new(self.start, left_end));
+            }
+        }
+
+        // Check for right part
+        if self.last > other.last {
+            let right_start = other.last + 1;
+            if right_start <= self.last {
+                right = Some(Range::new(right_start, self.last));
+            }
+        }
+
+        (left, right)
+    }
+
     /// Attempts to merge two ranges.
     ///
     /// If the ranges intersect or are adjacent, returns a new range that covers both.
@@ -148,7 +297,7 @@ impl Range {
     ///
     /// `Some(range)` with the merged range if successful, `None` otherwise.
     #[inline]
-    pub fn merge(&self, other: &Self) -> Option<Self> {
+    pub fn union(&self, other: &Self) -> Option<Self> {
         self.intersects_or_adjacent(other).then_some({
             let start = self.start.min(other.start);
             let last = self.last.max(other.last);
@@ -289,6 +438,26 @@ impl RangeSet {
         self.0.is_empty()
     }
 
+    /// Returns the start offset of the first range in the set.
+    ///
+    /// # Returns
+    ///
+    /// The start offset of the first range, or `None` if the set is empty.
+    #[inline]
+    pub fn start(&self) -> Option<usize> {
+        self.0.iter().next().map(|(start, _)| *start)
+    }
+
+    /// Returns the end offset of the last range in the set.
+    ///
+    /// # Returns
+    ///
+    /// The last offset of the last range, or `None` if the set is empty.
+    #[inline]
+    pub fn last(&self) -> Option<usize> {
+        self.0.iter().next_back().map(|(_, last)| *last)
+    }
+
     /// Checks if the set contains a specific offset.
     ///
     /// # Arguments
@@ -321,6 +490,18 @@ impl RangeSet {
             return rng.last <= *last;
         }
         false
+    }
+
+    /// Returns an iterator over the ranges in the set.
+    ///
+    /// # Returns
+    ///
+    /// An iterator over the ranges in the set.
+    #[inline]
+    pub fn ranges(&self) -> impl Iterator<Item = Range> {
+        self.0
+            .iter()
+            .map(|(start, end)| Range::from((*start, *end)))
     }
 
     /// Inserts a range into the set.
@@ -374,7 +555,7 @@ impl RangeSet {
             let rng_to_merge: Range = unsafe { cursor.remove_next().unwrap_unchecked().into() };
             // SAFETY: The loop condition `intersects_or_adjacent` guarantees that `merge`
             // will return `Some`, so this unwrap is safe.
-            merged_rng = unsafe { merged_rng.merge(&rng_to_merge).unwrap_unchecked() };
+            merged_rng = unsafe { merged_rng.union(&rng_to_merge).unwrap_unchecked() };
         }
         unsafe {
             // safety:
@@ -1086,6 +1267,56 @@ mod tests {
     }
 
     #[test]
+    fn test_offset_range_start() {
+        // Test basic start values
+        let range = Range::new(0, 5);
+        assert_eq!(range.start(), 0);
+
+        let range = Range::new(100, 200);
+        assert_eq!(range.start(), 100);
+
+        let range = Range::new(usize::MAX - 1, usize::MAX);
+        assert_eq!(range.start(), usize::MAX - 1);
+    }
+
+    #[test]
+    fn test_offset_range_last() {
+        // Test basic last values
+        let range = Range::new(0, 5);
+        assert_eq!(range.last(), 5);
+
+        let range = Range::new(100, 200);
+        assert_eq!(range.last(), 200);
+
+        let range = Range::new(usize::MAX - 1, usize::MAX);
+        assert_eq!(range.last(), usize::MAX);
+    }
+
+    #[test]
+    fn test_offset_range_start_last_single_element() {
+        // Test single element range
+        let range = Range::new(42, 42);
+        assert_eq!(range.start(), 42);
+        assert_eq!(range.last(), 42);
+        assert_eq!(range.len(), 1);
+    }
+
+    #[test]
+    fn test_offset_range_start_last_immutable() {
+        // Test that start and last are immutable and return correct values
+        let range = Range::new(10, 20);
+        let start = range.start();
+        let last = range.last();
+
+        assert_eq!(start, 10);
+        assert_eq!(last, 20);
+
+        // Multiple calls should return same values
+        assert_eq!(range.start(), 10);
+        assert_eq!(range.last(), 20);
+    }
+
+    #[test]
     fn test_offset_range_contains_n() {
         let range = Range::new(5, 10);
         assert!(range.contains_n(5));
@@ -1093,6 +1324,40 @@ mod tests {
         assert!(range.contains_n(10));
         assert!(!range.contains_n(4));
         assert!(!range.contains_n(11));
+    }
+
+    #[test]
+    fn test_offset_range_start_last_edge_cases() {
+        // Test with maximum usize values
+        let range = Range::new(usize::MAX, usize::MAX);
+        assert_eq!(range.start(), usize::MAX);
+        assert_eq!(range.last(), usize::MAX);
+        assert_eq!(range.len(), 1);
+
+        // Test with zero
+        let range = Range::new(0, 0);
+        assert_eq!(range.start(), 0);
+        assert_eq!(range.last(), 0);
+        assert_eq!(range.len(), 1);
+
+        // Test large range (avoid overflow by using a smaller value)
+        let range = Range::new(0, usize::MAX - 1);
+        assert_eq!(range.start(), 0);
+        assert_eq!(range.last(), usize::MAX - 1);
+        assert_eq!(range.len(), usize::MAX);
+    }
+
+    #[test]
+    fn test_offset_range_start_last_method_consistency() {
+        // Ensure start() and last() methods are consistent with constructor
+        let start = 42;
+        let last = 100;
+        let range = Range::new(start, last);
+
+        assert_eq!(range.start(), start);
+        assert_eq!(range.last(), last);
+        assert_eq!(range.start(), range.start());
+        assert_eq!(range.last(), range.last());
     }
 
     #[test]
@@ -1116,6 +1381,12 @@ mod tests {
         assert!(range.intersects(&Range::new(6, 9))); // Contained in range
         assert!(!range.intersects(&Range::new(2, 4))); // Completely before
         assert!(!range.intersects(&Range::new(11, 15))); // Completely after
+
+        // Edge cases
+        assert!(range.intersects(&Range::new(10, 15))); // Touching at end
+        assert!(range.intersects(&Range::new(0, 5))); // Touching at start
+        assert!(!range.intersects(&Range::new(0, 4))); // Just before
+        assert!(!range.intersects(&Range::new(11, 20))); // Just after
     }
 
     #[test]
@@ -1126,10 +1397,18 @@ mod tests {
         assert!(range.intersects_or_adjacent(&Range::new(8, 12))); // Overlaps end
         assert!(range.intersects_or_adjacent(&Range::new(3, 12))); // Contains range
         assert!(range.intersects_or_adjacent(&Range::new(6, 9))); // Contained in range
-        assert!(range.intersects_or_adjacent(&Range::new(2, 4))); // Adjacent before
-        assert!(range.intersects_or_adjacent(&Range::new(11, 15))); // Adjacent after
-        assert!(!range.intersects_or_adjacent(&Range::new(1, 3))); // Separated before
-        assert!(!range.intersects_or_adjacent(&Range::new(12, 15))); // Separated after
+        assert!(range.intersects_or_adjacent(&Range::new(2, 4))); // Adjacent before (4+1=5)
+        assert!(range.intersects_or_adjacent(&Range::new(11, 15))); // Adjacent after (10+1=11)
+        assert!(range.intersects_or_adjacent(&Range::new(4, 4))); // Adjacent before
+        assert!(range.intersects_or_adjacent(&Range::new(11, 11))); // Adjacent after
+
+        // Additional edge cases
+        assert!(range.intersects_or_adjacent(&Range::new(10, 15))); // Touching at end
+        assert!(range.intersects_or_adjacent(&Range::new(0, 5))); // Touching at start
+        assert!(range.intersects_or_adjacent(&Range::new(4, 4))); // Adjacent before
+        assert!(range.intersects_or_adjacent(&Range::new(11, 11))); // Adjacent after
+        assert!(!range.intersects_or_adjacent(&Range::new(0, 3))); // Not adjacent (3+1=4 < 5)
+        assert!(!range.intersects_or_adjacent(&Range::new(12, 20))); // Not adjacent (10+1=11 < 12)
     }
 
     #[test]
@@ -1137,16 +1416,16 @@ mod tests {
         let range = Range::new(5, 10);
 
         // Merge with overlapping range
-        assert_eq!(range.merge(&Range::new(8, 15)), Some(Range::new(5, 15)));
+        assert_eq!(range.union(&Range::new(8, 15)), Some(Range::new(5, 15)));
 
         // Merge with adjacent range (after)
-        assert_eq!(range.merge(&Range::new(11, 15)), Some(Range::new(5, 15)));
+        assert_eq!(range.union(&Range::new(11, 15)), Some(Range::new(5, 15)));
 
         // Merge with adjacent range (before)
-        assert_eq!(range.merge(&Range::new(1, 4)), Some(Range::new(1, 10)));
+        assert_eq!(range.union(&Range::new(1, 4)), Some(Range::new(1, 10)));
 
         // Cannot merge with separated range
-        assert_eq!(range.merge(&Range::new(12, 15)), None);
+        assert_eq!(range.union(&Range::new(12, 15)), None);
     }
 
     #[test]
@@ -1774,5 +2053,169 @@ mod tests {
         assert_eq!(chunk[0], Range::new(0, 9));
         assert!(chunks.next().is_none());
         assert!(set.is_empty());
+    }
+
+    #[test]
+    fn test_offset_range_is_adjacent() {
+        let range1 = Range::new(0, 5);
+        let range2 = Range::new(6, 10);
+        let range3 = Range::new(7, 10);
+        let range4 = Range::new(5, 10);
+
+        // Adjacent ranges
+        assert!(range1.is_adjacent(&range2));
+        assert!(range2.is_adjacent(&range1));
+
+        // Not adjacent (gap of 1)
+        assert!(!range1.is_adjacent(&range3));
+        assert!(!range3.is_adjacent(&range1));
+
+        // Overlapping ranges are not adjacent
+        assert!(!range1.is_adjacent(&range4));
+        assert!(!range4.is_adjacent(&range1));
+
+        // Single element ranges
+        let single1 = Range::new(10, 10);
+        let single2 = Range::new(11, 11);
+        let single3 = Range::new(12, 12);
+
+        assert!(single1.is_adjacent(&single2));
+        assert!(!single1.is_adjacent(&single3));
+
+        // Edge case: maximum usize values
+        let max_range = Range::new(usize::MAX - 1, usize::MAX - 1);
+        let adjacent_max = Range::new(usize::MAX, usize::MAX);
+        assert!(max_range.is_adjacent(&adjacent_max));
+    }
+
+    #[test]
+    fn test_offset_range_midpoint() {
+        // Even length range
+        let range1 = Range::new(0, 10);
+        assert_eq!(range1.midpoint(), 5);
+
+        // Odd length range
+        let range2 = Range::new(5, 8);
+        assert_eq!(range2.midpoint(), 6);
+
+        // Single element range
+        let range3 = Range::new(42, 42);
+        assert_eq!(range3.midpoint(), 42);
+
+        // Two element range
+        let range4 = Range::new(10, 11);
+        assert_eq!(range4.midpoint(), 10);
+
+        // Large range
+        let range5 = Range::new(1000, 2000);
+        assert_eq!(range5.midpoint(), 1500);
+    }
+
+    #[test]
+    fn test_offset_range_intersection() {
+        // Overlapping ranges
+        let range1 = Range::new(0, 10);
+        let range2 = Range::new(5, 15);
+        let intersection = range1.intersection(&range2).unwrap();
+        assert_eq!(intersection, Range::new(5, 10));
+
+        // One range contained within another
+        let range3 = Range::new(2, 8);
+        let range4 = Range::new(0, 10);
+        let intersection2 = range3.intersection(&range4).unwrap();
+        assert_eq!(intersection2, Range::new(2, 8));
+
+        // No intersection
+        let range5 = Range::new(0, 5);
+        let range6 = Range::new(10, 15);
+        assert!(range5.intersection(&range6).is_none());
+
+        // Touching ranges (not considered intersecting)
+        let range7 = Range::new(0, 5);
+        let range8 = Range::new(6, 10);
+        assert!(range7.intersection(&range8).is_none());
+
+        // Single element intersection
+        let range9 = Range::new(0, 5);
+        let range10 = Range::new(5, 10);
+        let intersection3 = range9.intersection(&range10).unwrap();
+        assert_eq!(intersection3, Range::new(5, 5));
+    }
+
+    #[test]
+    fn test_offset_range_union() {
+        // Overlapping ranges
+        let range1 = Range::new(0, 5);
+        let range2 = Range::new(3, 10);
+        let union = range1.union(&range2).unwrap();
+        assert_eq!(union, Range::new(0, 10));
+
+        // Adjacent ranges
+        let range3 = Range::new(0, 5);
+        let range4 = Range::new(6, 10);
+        let union2 = range3.union(&range4).unwrap();
+        assert_eq!(union2, Range::new(0, 10));
+
+        // Separate ranges
+        let range5 = Range::new(0, 5);
+        let range6 = Range::new(7, 10);
+        assert!(range5.union(&range6).is_none());
+
+        // Identical ranges
+        let range7 = Range::new(0, 10);
+        let union3 = range7.union(&range7).unwrap();
+        assert_eq!(union3, Range::new(0, 10));
+    }
+
+    #[test]
+    fn test_offset_range_difference() {
+        // Other range splits self into two parts
+        let range1 = Range::new(0, 10);
+        let range2 = Range::new(3, 7);
+        let (left, right) = range1.difference(&range2);
+        assert_eq!(left, Some(Range::new(0, 2)));
+        assert_eq!(right, Some(Range::new(8, 10)));
+
+        // Other range carves from the start
+        let range3 = Range::new(0, 10);
+        let range4 = Range::new(0, 5);
+        let (left2, right2) = range3.difference(&range4);
+        assert_eq!(left2, None);
+        assert_eq!(right2, Some(Range::new(6, 10)));
+
+        // Other range carves from the end
+        let range5 = Range::new(0, 10);
+        let range6 = Range::new(5, 10);
+        let (left3, right3) = range5.difference(&range6);
+        assert_eq!(left3, Some(Range::new(0, 4)));
+        assert_eq!(right3, None);
+
+        // Other range completely covers self
+        let range7 = Range::new(3, 7);
+        let range8 = Range::new(0, 10);
+        let (left4, right4) = range7.difference(&range8);
+        assert_eq!(left4, None);
+        assert_eq!(right4, None);
+
+        // No intersection
+        let range9 = Range::new(0, 5);
+        let range10 = Range::new(10, 15);
+        let (left5, right5) = range9.difference(&range10);
+        assert_eq!(left5, Some(Range::new(0, 5)));
+        assert_eq!(right5, None);
+
+        // Single element difference
+        let range11 = Range::new(0, 5);
+        let range12 = Range::new(1, 4);
+        let (left6, right6) = range11.difference(&range12);
+        assert_eq!(left6, Some(Range::new(0, 0)));
+        assert_eq!(right6, Some(Range::new(5, 5)));
+
+        // Edge case: other range at boundary
+        let range13 = Range::new(0, 10);
+        let range14 = Range::new(0, 0);
+        let (left7, right7) = range13.difference(&range14);
+        assert_eq!(left7, None);
+        assert_eq!(right7, Some(Range::new(1, 10)));
     }
 }
