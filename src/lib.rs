@@ -380,7 +380,7 @@ impl From<(usize, usize)> for Range {
 /// set.insert_range(&Range::new(10, 15));
 /// // The set now contains two separate ranges
 /// ```
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RangeSet(BTreeMap<usize, usize>);
 
 impl RangeSet {
