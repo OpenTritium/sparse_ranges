@@ -18,9 +18,7 @@ pub struct Range {
 }
 
 impl fmt::Debug for Range {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}..={}", self.start, self.last)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}..={}", self.start, self.last) }
 }
 
 impl Range {
@@ -42,15 +40,11 @@ impl Range {
 
     /// Returns the start offset of the range.
     #[inline]
-    pub fn start(&self) -> usize {
-        self.start
-    }
+    pub fn start(&self) -> usize { self.start }
 
     /// Returns the last offset of the range.
     #[inline]
-    pub fn last(&self) -> usize {
-        self.last
-    }
+    pub fn last(&self) -> usize { self.last }
 
     /// Returns the length of the range.
     ///
@@ -62,18 +56,14 @@ impl Range {
     /// assert_eq!(range.len(), 6);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize {
-        self.last - self.start + 1
-    }
+    pub fn len(&self) -> usize { self.last - self.start + 1 }
 
     /// Always returns `false` because an `Range` is never empty.
     ///
     /// An `Range` is always considered non-empty because it represents
     /// an inclusive range from start to last where both ends are included.
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        false
-    }
+    pub const fn is_empty(&self) -> bool { false }
 
     /// Checks if the range contains a specific offset.
     ///
@@ -85,9 +75,7 @@ impl Range {
     ///
     /// `true` if `n` is within the range (inclusive), `false` otherwise.
     #[inline]
-    pub fn contains_n(&self, n: usize) -> bool {
-        self.start <= n && n <= self.last
-    }
+    pub fn contains_n(&self, n: usize) -> bool { self.start <= n && n <= self.last }
 
     /// Checks if the range contains another range.
     ///
@@ -99,9 +87,7 @@ impl Range {
     ///
     /// `true` if `other.start..=other.last` is completely within `self.start..=self.last`.
     #[inline]
-    pub fn contains(&self, other: &Self) -> bool {
-        self.start <= other.start && self.last >= other.last
-    }
+    pub fn contains(&self, other: &Self) -> bool { self.start <= other.start && self.last >= other.last }
 
     /// Checks if two ranges intersect.
     ///
@@ -115,9 +101,7 @@ impl Range {
     ///
     /// `true` if the ranges intersect, `false` otherwise.
     #[inline]
-    pub fn intersects(&self, other: &Self) -> bool {
-        self.start <= other.last && self.last >= other.start
-    }
+    pub fn intersects(&self, other: &Self) -> bool { self.start <= other.last && self.last >= other.start }
 
     /// Checks if two ranges intersect or are adjacent.
     ///
@@ -180,9 +164,7 @@ impl Range {
     /// assert_eq!(range.midpoint(), 6);
     /// ```
     #[inline]
-    pub fn midpoint(&self) -> usize {
-        self.start + (self.last - self.start) / 2
-    }
+    pub fn midpoint(&self) -> usize { self.start + (self.last - self.start) / 2 }
 
     /// Returns the intersection of two ranges.
     ///
@@ -310,9 +292,7 @@ impl Range {
 impl Range {
     #[inline]
     #[must_use]
-    pub fn to_http_range_header(&self) -> String {
-        format!("{}-{}", self.start, self.last)
-    }
+    pub fn to_http_range_header(&self) -> String { format!("{}-{}", self.start, self.last) }
 }
 
 impl TryFrom<&ops::Range<usize>> for Range {
@@ -346,12 +326,7 @@ impl From<&ops::RangeInclusive<usize>> for Range {
     ///
     /// * `rng` - The inclusive range to convert
     #[inline]
-    fn from(rng: &ops::RangeInclusive<usize>) -> Self {
-        Self {
-            start: *rng.start(),
-            last: *rng.end(),
-        }
-    }
+    fn from(rng: &ops::RangeInclusive<usize>) -> Self { Self { start: *rng.start(), last: *rng.end() } }
 }
 
 impl From<(usize, usize)> for Range {
@@ -367,10 +342,7 @@ impl From<(usize, usize)> for Range {
     #[inline]
     fn from(rng: (usize, usize)) -> Self {
         debug_assert!(rng.0 <= rng.1);
-        Self {
-            start: rng.0,
-            last: rng.1,
-        }
+        Self { start: rng.0, last: rng.1 }
     }
 }
 
@@ -387,9 +359,7 @@ impl PartialEq<Range> for RangeSet {
 
 impl PartialEq<RangeSet> for Range {
     #[inline]
-    fn eq(&self, other: &RangeSet) -> bool {
-        other.eq(self)
-    }
+    fn eq(&self, other: &RangeSet) -> bool { other.eq(self) }
 }
 
 /// A set of non-overlapping inclusive ranges.
@@ -420,9 +390,7 @@ impl RangeSet {
     /// let set = RangeSet::new();
     /// assert!(set.is_empty());
     /// ```
-    pub fn new() -> Self {
-        Default::default()
-    }
+    pub fn new() -> Self { Default::default() }
 
     /// Returns the total number of offsets covered by all ranges in the set.
     ///
@@ -436,9 +404,7 @@ impl RangeSet {
     /// assert_eq!(set.len(), 9);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize {
-        self.0.iter().map(|(start, last)| last - start + 1).sum()
-    }
+    pub fn len(&self) -> usize { self.0.iter().map(|(start, last)| last - start + 1).sum() }
 
     /// Returns the number of ranges in the set.
     ///
@@ -451,9 +417,7 @@ impl RangeSet {
     /// set.insert_range(&Range::new(10, 12));
     /// assert_eq!(set.ranges_count(), 2);
     #[inline]
-    pub fn ranges_count(&self) -> usize {
-        self.0.len()
-    }
+    pub fn ranges_count(&self) -> usize { self.0.len() }
 
     /// Checks if the set is empty.
     ///
@@ -461,9 +425,7 @@ impl RangeSet {
     ///
     /// `true` if the set contains no ranges, `false` otherwise.
     #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
 
     /// Returns the start offset of the first range in the set.
     ///
@@ -471,9 +433,7 @@ impl RangeSet {
     ///
     /// The start offset of the first range, or `None` if the set is empty.
     #[inline]
-    pub fn start(&self) -> Option<usize> {
-        self.0.iter().next().map(|(start, _)| *start)
-    }
+    pub fn start(&self) -> Option<usize> { self.0.iter().next().map(|(start, _)| *start) }
 
     /// Returns the end offset of the last range in the set.
     ///
@@ -481,9 +441,7 @@ impl RangeSet {
     ///
     /// The last offset of the last range, or `None` if the set is empty.
     #[inline]
-    pub fn last(&self) -> Option<usize> {
-        self.0.iter().next_back().map(|(_, last)| *last)
-    }
+    pub fn last(&self) -> Option<usize> { self.0.iter().next_back().map(|(_, last)| *last) }
 
     /// Checks if the set contains a specific offset.
     ///
@@ -526,9 +484,7 @@ impl RangeSet {
     /// An iterator over the ranges in the set.
     #[inline]
     pub fn ranges(&self) -> impl Iterator<Item = Range> {
-        self.0
-            .iter()
-            .map(|(start, end)| Range::from((*start, *end)))
+        self.0.iter().map(|(start, end)| Range::from((*start, *end)))
     }
 
     /// Inserts a range into the set.
@@ -586,9 +542,7 @@ impl RangeSet {
         }
         unsafe {
             // safety:
-            cursor
-                .insert_after(merged_rng.start, merged_rng.last)
-                .unwrap_unchecked()
+            cursor.insert_after(merged_rng.start, merged_rng.last).unwrap_unchecked()
         };
         true
     }
@@ -853,11 +807,7 @@ impl RangeSet {
     /// ```
     #[must_use]
     pub fn freeze(&self) -> FrozenRangeSet {
-        let ranges = self
-            .0
-            .iter()
-            .map(|(&start, &last)| Range::new(start, last))
-            .collect::<Box<[_]>>();
+        let ranges = self.0.iter().map(|(&start, &last)| Range::new(start, last)).collect::<Box<[_]>>();
         FrozenRangeSet(ranges)
     }
 
@@ -885,19 +835,14 @@ impl RangeSet {
     /// ```
     pub fn into_chunks(&mut self, block_size: usize) -> ChunkedMutIter<'_> {
         debug_assert!(block_size > 0, "block_size must be greater than 0");
-        ChunkedMutIter {
-            inner: self,
-            block_size,
-        }
+        ChunkedMutIter { inner: self, block_size }
     }
 }
 
 impl BitOrAssign<&Self> for RangeSet {
     /// Performs the `|=` operation, equivalent to [`RangeSet::union_assign`](RangeSet::union).
     #[inline]
-    fn bitor_assign(&mut self, rhs: &Self) {
-        self.union_assign(rhs);
-    }
+    fn bitor_assign(&mut self, rhs: &Self) { self.union_assign(rhs); }
 }
 
 impl BitOr<Self> for &RangeSet {
@@ -905,17 +850,13 @@ impl BitOr<Self> for &RangeSet {
 
     /// Performs the `|` operation, equivalent to [`RangeSet::union`].
     #[inline]
-    fn bitor(self, rhs: Self) -> Self::Output {
-        self.union(rhs)
-    }
+    fn bitor(self, rhs: Self) -> Self::Output { self.union(rhs) }
 }
 
 impl SubAssign<&Self> for RangeSet {
     /// Performs the `-=` operation, equivalent to [`RangeSet::difference`].
     #[inline]
-    fn sub_assign(&mut self, rhs: &Self) {
-        self.difference_assign(rhs);
-    }
+    fn sub_assign(&mut self, rhs: &Self) { self.difference_assign(rhs); }
 }
 
 impl Sub<Self> for &RangeSet {
@@ -923,9 +864,7 @@ impl Sub<Self> for &RangeSet {
 
     /// Performs the `-` operation, equivalent to [`RangeSet::difference`].
     #[inline]
-    fn sub(self, rhs: Self) -> Self::Output {
-        self.difference(rhs)
-    }
+    fn sub(self, rhs: Self) -> Self::Output { self.difference(rhs) }
 }
 
 impl fmt::Debug for RangeSet {
@@ -1050,10 +989,7 @@ impl RangeSet {
     ///
     /// It returns a `RangeUnsatisfiableError` if any calculated range is invalid
     /// with respect to the `total_size`, as per RFC 7233.
-    pub fn parse_ranges_headers(
-        header_content: &str,
-        total_size: usize,
-    ) -> Result<RangeSet, Error> {
+    pub fn parse_ranges_headers(header_content: &str, total_size: usize) -> Result<RangeSet, Error> {
         use http_range_header::{EndPosition, StartPosition};
         if total_size == 0 {
             // According to RFC 7233, a range header on a zero-length entity
@@ -1131,11 +1067,7 @@ impl RangeSet {
         if self.0.is_empty() {
             return None;
         }
-        let parts: Vec<String> = self
-            .0
-            .iter()
-            .map(|(&start, &last)| format!("{}-{}", start, last))
-            .collect();
+        let parts: Vec<String> = self.0.iter().map(|(&start, &last)| format!("{}-{}", start, last)).collect();
         Some(format!("bytes={}", parts.join(",")).into_boxed_str())
     }
 }
@@ -1156,33 +1088,23 @@ impl Debug for FrozenRangeSet {
 impl Deref for FrozenRangeSet {
     type Target = [Range];
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl FrozenRangeSet {
     #[inline]
-    pub fn len(&self) -> usize {
-        self.0.iter().map(|rng| rng.len()).sum()
-    }
+    pub fn len(&self) -> usize { self.0.iter().map(|rng| rng.len()).sum() }
 
     #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
+    pub fn is_empty(&self) -> bool { self.0.is_empty() }
 
     /// Returns the start offset of the first range in the set.
     #[inline]
-    pub fn start(&self) -> Option<usize> {
-        self.0.first().map(|rng| rng.start())
-    }
+    pub fn start(&self) -> Option<usize> { self.0.first().map(|rng| rng.start()) }
 
     /// Returns the end offset of the last range in the set.
     #[inline]
-    pub fn last(&self) -> Option<usize> {
-        self.0.last().map(|rng| rng.last())
-    }
+    pub fn last(&self) -> Option<usize> { self.0.last().map(|rng| rng.last()) }
 
     /// Returns the number of ranges in the set.
     ///
@@ -1197,9 +1119,7 @@ impl FrozenRangeSet {
     /// assert_eq!(frozen.ranges_count(), 2);
     /// ```
     #[inline]
-    pub fn ranges_count(&self) -> usize {
-        self.0.len()
-    }
+    pub fn ranges_count(&self) -> usize { self.0.len() }
 
     /// Checks if the set contains a specific offset.
     ///
@@ -1277,9 +1197,7 @@ impl FrozenRangeSet {
     /// assert_eq!(ranges.len(), 2);
     /// ```
     #[inline]
-    pub fn iter(&self) -> std::slice::Iter<'_, Range> {
-        self.0.iter()
-    }
+    pub fn iter(&self) -> std::slice::Iter<'_, Range> { self.0.iter() }
 }
 
 #[cfg(feature = "http")]
@@ -1290,10 +1208,7 @@ impl FrozenRangeSet {
         if self.is_empty() {
             return None;
         }
-        let parts: Vec<String> = self
-            .iter()
-            .map(|range| format!("{}-{}", range.start(), range.last()))
-            .collect();
+        let parts: Vec<String> = self.iter().map(|range| format!("{}-{}", range.start(), range.last())).collect();
         Some(format!("bytes={}", parts.join(",")).into_boxed_str())
     }
 }
@@ -1310,11 +1225,7 @@ impl From<FrozenRangeSet> for RangeSet {
     /// A new `RangeSet` containing the same ranges as the frozen set.
     #[inline]
     fn from(frozen: FrozenRangeSet) -> Self {
-        let map = frozen
-            .0
-            .into_iter()
-            .map(|Range { start, last }| (start, last))
-            .collect::<BTreeMap<_, _>>();
+        let map = frozen.0.into_iter().map(|Range { start, last }| (start, last)).collect::<BTreeMap<_, _>>();
         RangeSet(map)
     }
 }
@@ -1328,21 +1239,15 @@ impl PartialEq<FrozenRangeSet> for RangeSet {
 
 impl PartialEq<RangeSet> for FrozenRangeSet {
     #[inline]
-    fn eq(&self, other: &RangeSet) -> bool {
-        other.eq(self)
-    }
+    fn eq(&self, other: &RangeSet) -> bool { other.eq(self) }
 }
 
 impl PartialEq<Range> for FrozenRangeSet {
-    fn eq(&self, other: &Range) -> bool {
-        self.0.len() == 1 && *unsafe { self.0.first().unwrap_unchecked() } == *other
-    }
+    fn eq(&self, other: &Range) -> bool { self.0.len() == 1 && *unsafe { self.0.first().unwrap_unchecked() } == *other }
 }
 
 impl PartialEq<FrozenRangeSet> for Range {
-    fn eq(&self, other: &FrozenRangeSet) -> bool {
-        other.eq(self)
-    }
+    fn eq(&self, other: &FrozenRangeSet) -> bool { other.eq(self) }
 }
 
 #[cfg(test)]
@@ -1351,15 +1256,10 @@ mod tests {
     use std::{collections::BTreeMap, ops::RangeInclusive};
 
     fn btree_set(ranges: &[RangeInclusive<usize>]) -> BTreeMap<usize, usize> {
-        ranges
-            .iter()
-            .map(|rng| (*rng.start(), *rng.end()))
-            .collect()
+        ranges.iter().map(|rng| (*rng.start(), *rng.end())).collect()
     }
 
-    fn range_set(ranges: &[RangeInclusive<usize>]) -> RangeSet {
-        RangeSet(btree_set(ranges))
-    }
+    fn range_set(ranges: &[RangeInclusive<usize>]) -> RangeSet { RangeSet(btree_set(ranges)) }
 
     #[test]
     fn test_offset_range_new() {
@@ -1867,26 +1767,17 @@ mod tests {
 
         // Test single range
         let single_range = RangeSet::from_iter(vec![Range::new(0, 5)]).freeze();
-        assert_eq!(
-            single_range.to_http_range_header(),
-            Some("bytes=0-5".into())
-        );
+        assert_eq!(single_range.to_http_range_header(), Some("bytes=0-5".into()));
 
         // Test multiple ranges
-        assert_eq!(
-            frozen.to_http_range_header(),
-            Some("bytes=0-5,10-15".into())
-        );
+        assert_eq!(frozen.to_http_range_header(), Some("bytes=0-5,10-15".into()));
 
         // Test with larger ranges
         let mut large_set = RangeSet::new();
         large_set.insert_range(&Range::new(100, 199));
         large_set.insert_range(&Range::new(300, 399));
         let large_frozen = large_set.freeze();
-        assert_eq!(
-            large_frozen.to_http_range_header(),
-            Some("bytes=100-199,300-399".into())
-        );
+        assert_eq!(large_frozen.to_http_range_header(), Some("bytes=100-199,300-399".into()));
     }
 
     #[test]
@@ -1906,10 +1797,7 @@ mod tests {
 
         // Test maximum values
         let max_range = Range::new(usize::MAX - 1, usize::MAX);
-        assert_eq!(
-            max_range.to_http_range_header(),
-            format!("{}-{}", usize::MAX - 1, usize::MAX)
-        );
+        assert_eq!(max_range.to_http_range_header(), format!("{}-{}", usize::MAX - 1, usize::MAX));
     }
 
     #[test]
