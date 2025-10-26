@@ -1242,6 +1242,27 @@ impl FrozenRangeSet {
     }
 }
 
+impl From<FrozenRangeSet> for RangeSet {
+    /// Converts a `FrozenRangeSet` back into a mutable `RangeSet`.
+    ///
+    /// # Arguments
+    ///
+    /// * `frozen` - The frozen range set to convert
+    ///
+    /// # Returns
+    ///
+    /// A new `RangeSet` containing the same ranges as the frozen set.
+    #[inline]
+    fn from(frozen: FrozenRangeSet) -> Self {
+        let map = frozen
+            .0
+            .into_iter()
+            .map(|Range { start, last }| (start, last))
+            .collect::<BTreeMap<_, _>>();
+        RangeSet(map)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{Error, Range, RangeSet};
