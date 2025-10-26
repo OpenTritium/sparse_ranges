@@ -306,6 +306,15 @@ impl Range {
     }
 }
 
+#[cfg(feature = "http")]
+impl Range {
+    #[inline]
+    #[must_use]
+    pub fn to_http_range_header(&self) -> String {
+        format!("{}-{}", self.start, self.last)
+    }
+}
+
 impl TryFrom<&ops::Range<usize>> for Range {
     type Error = Error;
 
@@ -1261,6 +1270,22 @@ impl FrozenRangeSet {
     }
 }
 
+#[cfg(feature = "http")]
+impl FrozenRangeSet {
+    #[inline]
+    #[must_use]
+    pub fn to_http_range_header(&self) -> Option<Box<str>> {
+        if self.is_empty() {
+            return None;
+        }
+        let parts: Vec<String> = self
+            .iter()
+            .map(|range| format!("{}-{}", range.start(), range.last()))
+            .collect();
+        Some(format!("bytes={}", parts.join(",")).into_boxed_str())
+    }
+}
+
 impl From<FrozenRangeSet> for RangeSet {
     /// Converts a `FrozenRangeSet` back into a mutable `RangeSet`.
     ///
@@ -1814,6 +1839,53 @@ mod tests {
         // Test multiple ranges
         set.insert_range(&Range::new(10, 15));
         assert_eq!(set.to_http_range_header(), Some("bytes=0-5,10-15".into()));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_frozen_rangeset_to_http_range_header() {
+        let mut set = RangeSet::new();
+        set.insert_range(&Range::new(0, 5));
+        set.insert_range(&Range::new(10, 15));
+        let frozen = set.freeze();
+
+        // Test empty frozen set
+        let empty_frozen = RangeSet::new().freeze();
+        assert_eq!(empty_frozen.to_http_range_header(), None);
+
+        // Test single range
+        let single_range = RangeSet::from_iter(vec![Range::new(0, 5)]).freeze();
+        assert_eq!(single_range.to_http_range_header(), Some("bytes=0-5".into()));
+
+        // Test multiple ranges
+        assert_eq!(frozen.to_http_range_header(), Some("bytes=0-5,10-15".into()));
+
+        // Test with larger ranges
+        let mut large_set = RangeSet::new();
+        large_set.insert_range(&Range::new(100, 199));
+        large_set.insert_range(&Range::new(300, 399));
+        let large_frozen = large_set.freeze();
+        assert_eq!(large_frozen.to_http_range_header(), Some("bytes=100-199,300-399".into()));
+    }
+
+    #[test]
+    #[cfg(feature = "http")]
+    fn test_range_to_http_range_header() {
+        // Test single range
+        let range = Range::new(0, 5);
+        assert_eq!(range.to_http_range_header(), "0-5");
+
+        // Test larger range
+        let large_range = Range::new(100, 199);
+        assert_eq!(large_range.to_http_range_header(), "100-199");
+
+        // Test single element range
+        let single_element = Range::new(42, 42);
+        assert_eq!(single_element.to_http_range_header(), "42-42");
+
+        // Test maximum values
+        let max_range = Range::new(usize::MAX - 1, usize::MAX);
+        assert_eq!(max_range.to_http_range_header(), format!("{}-{}", usize::MAX - 1, usize::MAX));
     }
 
     #[test]
