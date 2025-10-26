@@ -1213,6 +1213,23 @@ impl FrozenRangeSet {
     }
 }
 
+impl From<RangeSet> for FrozenRangeSet {
+    /// Converts a mutable `RangeSet` into an immutable `FrozenRangeSet`.
+    ///
+    /// # Arguments
+    ///
+    /// * `set` - The range set to freeze
+    ///
+    /// # Returns
+    ///
+    /// A new `FrozenRangeSet` containing the same ranges as the input set.
+    #[inline]
+    fn from(set: RangeSet) -> Self {
+        let ranges = set.0.into_iter().map(Into::into).collect::<Box<[_]>>();
+        FrozenRangeSet(ranges)
+    }
+}
+
 impl From<FrozenRangeSet> for RangeSet {
     /// Converts a `FrozenRangeSet` back into a mutable `RangeSet`.
     ///
