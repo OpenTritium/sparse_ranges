@@ -1172,6 +1172,18 @@ impl FrozenRangeSet {
         self.0.is_empty()
     }
 
+    /// Returns the start offset of the first range in the set.
+    #[inline]
+    pub fn start(&self) -> Option<usize> {
+        self.0.first().map(|rng| rng.start())
+    }
+
+    /// Returns the end offset of the last range in the set.
+    #[inline]
+    pub fn last(&self) -> Option<usize> {
+        self.0.last().map(|rng| rng.last())
+    }
+
     /// Returns the number of ranges in the set.
     ///
     /// # Examples
@@ -1855,17 +1867,26 @@ mod tests {
 
         // Test single range
         let single_range = RangeSet::from_iter(vec![Range::new(0, 5)]).freeze();
-        assert_eq!(single_range.to_http_range_header(), Some("bytes=0-5".into()));
+        assert_eq!(
+            single_range.to_http_range_header(),
+            Some("bytes=0-5".into())
+        );
 
         // Test multiple ranges
-        assert_eq!(frozen.to_http_range_header(), Some("bytes=0-5,10-15".into()));
+        assert_eq!(
+            frozen.to_http_range_header(),
+            Some("bytes=0-5,10-15".into())
+        );
 
         // Test with larger ranges
         let mut large_set = RangeSet::new();
         large_set.insert_range(&Range::new(100, 199));
         large_set.insert_range(&Range::new(300, 399));
         let large_frozen = large_set.freeze();
-        assert_eq!(large_frozen.to_http_range_header(), Some("bytes=100-199,300-399".into()));
+        assert_eq!(
+            large_frozen.to_http_range_header(),
+            Some("bytes=100-199,300-399".into())
+        );
     }
 
     #[test]
@@ -1885,7 +1906,10 @@ mod tests {
 
         // Test maximum values
         let max_range = Range::new(usize::MAX - 1, usize::MAX);
-        assert_eq!(max_range.to_http_range_header(), format!("{}-{}", usize::MAX - 1, usize::MAX));
+        assert_eq!(
+            max_range.to_http_range_header(),
+            format!("{}-{}", usize::MAX - 1, usize::MAX)
+        );
     }
 
     #[test]
@@ -2231,15 +2255,15 @@ mod tests {
         let range = Range::new(5, 10);
         let mut set = RangeSet::new();
         set.insert_range(&range);
-        
+
         assert_eq!(set, range);
         assert_eq!(range, set);
-        
+
         // Test inequality when RangeSet contains multiple ranges
         set.insert_range(&Range::new(15, 20));
         assert_ne!(set, range);
         assert_ne!(range, set);
-        
+
         // Test inequality when RangeSet contains one range that doesn't match
         let mut set2 = RangeSet::new();
         set2.insert_range(&Range::new(0, 5));
@@ -2254,10 +2278,10 @@ mod tests {
         let mut set = RangeSet::new();
         set.insert_range(&range);
         let frozen = set.freeze();
-        
+
         assert_eq!(frozen, range);
         assert_eq!(range, frozen);
-        
+
         // Test inequality when FrozenRangeSet contains multiple ranges
         let mut set2 = RangeSet::new();
         set2.insert_range(&Range::new(5, 10));
@@ -2265,7 +2289,7 @@ mod tests {
         let frozen2 = set2.freeze();
         assert_ne!(frozen2, range);
         assert_ne!(range, frozen2);
-        
+
         // Test inequality when FrozenRangeSet contains one range that doesn't match
         let mut set3 = RangeSet::new();
         set3.insert_range(&Range::new(0, 5));
@@ -2281,17 +2305,17 @@ mod tests {
         set.insert_range(&Range::new(0, 5));
         set.insert_range(&Range::new(10, 15));
         let frozen = set.freeze();
-        
+
         assert_eq!(set, frozen);
         assert_eq!(frozen, set);
-        
+
         // Test inequality when ranges are different
         let mut set2 = RangeSet::new();
         set2.insert_range(&Range::new(0, 6)); // Different from set
         set2.insert_range(&Range::new(10, 15));
         assert_ne!(set2, frozen);
         assert_ne!(frozen, set2);
-        
+
         // Test inequality when number of ranges is different
         let mut set3 = RangeSet::new();
         set3.insert_range(&Range::new(0, 5));
@@ -2391,17 +2415,17 @@ mod tests {
         // Test chunking with maximum values
         let mut set = RangeSet::new();
         set.insert_range(&Range::new(0, usize::MAX - 1)); // Very large range
-        
+
         let mut chunks = set.into_chunks(1000);
         let first_chunk = chunks.next().unwrap();
         assert_eq!(first_chunk.len(), 1000);
-        
+
         // Test chunking with single element ranges
         let mut set2 = RangeSet::new();
         set2.insert_range(&Range::new(0, 0));
         set2.insert_range(&Range::new(2, 2));
         set2.insert_range(&Range::new(4, 4));
-        
+
         let chunks2: Vec<_> = set2.into_chunks(1).collect();
         assert_eq!(chunks2.len(), 3);
         assert_eq!(chunks2[0].len(), 1);
