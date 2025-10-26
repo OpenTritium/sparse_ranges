@@ -365,6 +365,24 @@ impl From<(usize, usize)> for Range {
     }
 }
 
+impl PartialEq<Range> for RangeSet {
+    #[inline]
+    fn eq(&self, other: &Range) -> bool {
+        if self.ranges_count() != 1 {
+            return false;
+        }
+        let (start, last) = unsafe { self.0.first_key_value().unwrap_unchecked() };
+        *start == other.start() && *last == other.last()
+    }
+}
+
+impl PartialEq<RangeSet> for Range {
+    #[inline]
+    fn eq(&self, other: &RangeSet) -> bool {
+        other.eq(self)
+    }
+}
+
 /// A set of non-overlapping inclusive ranges.
 ///
 /// This data structure efficiently maintains a set of non-overlapping,
@@ -872,6 +890,7 @@ impl BitOrAssign<&Self> for RangeSet {
         self.union_assign(rhs);
     }
 }
+
 impl BitOr<Self> for &RangeSet {
     type Output = RangeSet;
 
@@ -1260,6 +1279,32 @@ impl From<FrozenRangeSet> for RangeSet {
             .map(|Range { start, last }| (start, last))
             .collect::<BTreeMap<_, _>>();
         RangeSet(map)
+    }
+}
+
+impl PartialEq<FrozenRangeSet> for RangeSet {
+    #[inline]
+    fn eq(&self, other: &FrozenRangeSet) -> bool {
+        self.ranges_count() == other.ranges_count() && self.ranges().eq(other.iter().copied())
+    }
+}
+
+impl PartialEq<RangeSet> for FrozenRangeSet {
+    #[inline]
+    fn eq(&self, other: &RangeSet) -> bool {
+        other.eq(self)
+    }
+}
+
+impl PartialEq<Range> for FrozenRangeSet {
+    fn eq(&self, other: &Range) -> bool {
+        self.0.len() == 1 && *unsafe { self.0.first().unwrap_unchecked() } == *other
+    }
+}
+
+impl PartialEq<FrozenRangeSet> for Range {
+    fn eq(&self, other: &FrozenRangeSet) -> bool {
+        other.eq(self)
     }
 }
 
@@ -1900,6 +1945,125 @@ mod tests {
     }
 
     #[test]
+    fn test_union_assign() {
+        // Test basic union assign
+        let mut set1 = RangeSet::new();
+        set1.insert_range(&Range::new(0, 5));
+
+        let mut set2 = RangeSet::new();
+        set2.insert_range(&Range::new(10, 15));
+
+        set1.union_assign(&set2);
+        assert_eq!(set1.len(), 12); // 6 + 6 elements
+        assert!(set1.contains_n(0));
+        assert!(set1.contains_n(15));
+        assert!(!set1.contains_n(7));
+
+        // Test union assign with overlapping ranges
+        let mut set3 = RangeSet::new();
+        set3.insert_range(&Range::new(0, 10));
+
+        let mut set4 = RangeSet::new();
+        set4.insert_range(&Range::new(5, 15));
+
+        set3.union_assign(&set4);
+        assert_eq!(set3.len(), 16); // 0-15
+        assert!(set3.contains_n(0));
+        assert!(set3.contains_n(15));
+        assert!(!set3.contains_n(16));
+
+        // Test union assign with self
+        let mut set5 = RangeSet::new();
+        set5.insert_range(&Range::new(0, 5));
+        set5.union_assign(&set5.clone());
+        assert_eq!(set5.len(), 6);
+        assert!(set5.contains_n(0));
+        assert!(set5.contains_n(5));
+    }
+
+    #[test]
+    fn test_union_assign_empty() {
+        // Test union assign with empty set on right
+        let mut set1 = RangeSet::new();
+        set1.insert_range(&Range::new(0, 5));
+        let set2 = RangeSet::new();
+
+        set1.union_assign(&set2);
+        assert_eq!(set1.len(), 6);
+        assert!(set1.contains_n(0));
+        assert!(set1.contains_n(5));
+
+        // Test union assign with empty set on left
+        let mut set3 = RangeSet::new();
+        let mut set4 = RangeSet::new();
+        set4.insert_range(&Range::new(0, 5));
+
+        set3.union_assign(&set4);
+        assert_eq!(set3.len(), 6);
+        assert!(set3.contains_n(0));
+        assert!(set3.contains_n(5));
+    }
+
+    #[test]
+    fn test_difference_assign() {
+        // Test basic difference assign
+        let mut set1 = RangeSet::new();
+        set1.insert_range(&Range::new(0, 10));
+
+        let mut set2 = RangeSet::new();
+        set2.insert_range(&Range::new(5, 15));
+
+        set1.difference_assign(&set2);
+        assert_eq!(set1.len(), 5); // 0-4
+        assert!(set1.contains_n(0));
+        assert!(set1.contains_n(4));
+        assert!(!set1.contains_n(5));
+
+        // Test difference assign with no overlap
+        let mut set3 = RangeSet::new();
+        set3.insert_range(&Range::new(0, 5));
+
+        let mut set4 = RangeSet::new();
+        set4.insert_range(&Range::new(10, 15));
+
+        set3.difference_assign(&set4);
+        assert_eq!(set3.len(), 6);
+        assert!(set3.contains_n(0));
+        assert!(set3.contains_n(5));
+
+        // Test difference assign with empty set
+        let mut set5 = RangeSet::new();
+        set5.insert_range(&Range::new(0, 5));
+        let empty = RangeSet::new();
+
+        set5.difference_assign(&empty);
+        assert_eq!(set5.len(), 6);
+        assert!(set5.contains_n(0));
+        assert!(set5.contains_n(5));
+    }
+
+    #[test]
+    fn test_difference_assign_empty() {
+        // Test difference assign with empty set on right
+        let mut set1 = RangeSet::new();
+        set1.insert_range(&Range::new(0, 5));
+        let empty = RangeSet::new();
+
+        set1.difference_assign(&empty);
+        assert_eq!(set1.len(), 6);
+        assert!(set1.contains_n(0));
+        assert!(set1.contains_n(5));
+
+        // Test difference assign with empty set on left
+        let mut empty_set = RangeSet::new();
+        let mut set2 = RangeSet::new();
+        set2.insert_range(&Range::new(0, 5));
+
+        empty_set.difference_assign(&set2);
+        assert!(empty_set.is_empty());
+    }
+
+    #[test]
     fn test_difference_empty() {
         let set_a = range_set(&[10..=20]);
         let set_b = range_set(&[]);
@@ -1990,6 +2154,80 @@ mod tests {
     }
 
     #[test]
+    fn test_range_equality_with_rangeset() {
+        // Test equality when RangeSet contains exactly one range matching the Range
+        let range = Range::new(5, 10);
+        let mut set = RangeSet::new();
+        set.insert_range(&range);
+        
+        assert_eq!(set, range);
+        assert_eq!(range, set);
+        
+        // Test inequality when RangeSet contains multiple ranges
+        set.insert_range(&Range::new(15, 20));
+        assert_ne!(set, range);
+        assert_ne!(range, set);
+        
+        // Test inequality when RangeSet contains one range that doesn't match
+        let mut set2 = RangeSet::new();
+        set2.insert_range(&Range::new(0, 5));
+        assert_ne!(set2, range);
+        assert_ne!(range, set2);
+    }
+
+    #[test]
+    fn test_range_equality_with_frozen_rangeset() {
+        // Test equality when FrozenRangeSet contains exactly one range matching the Range
+        let range = Range::new(5, 10);
+        let mut set = RangeSet::new();
+        set.insert_range(&range);
+        let frozen = set.freeze();
+        
+        assert_eq!(frozen, range);
+        assert_eq!(range, frozen);
+        
+        // Test inequality when FrozenRangeSet contains multiple ranges
+        let mut set2 = RangeSet::new();
+        set2.insert_range(&Range::new(5, 10));
+        set2.insert_range(&Range::new(15, 20));
+        let frozen2 = set2.freeze();
+        assert_ne!(frozen2, range);
+        assert_ne!(range, frozen2);
+        
+        // Test inequality when FrozenRangeSet contains one range that doesn't match
+        let mut set3 = RangeSet::new();
+        set3.insert_range(&Range::new(0, 5));
+        let frozen3 = set3.freeze();
+        assert_ne!(frozen3, range);
+        assert_ne!(range, frozen3);
+    }
+
+    #[test]
+    fn test_rangeset_equality_with_frozen_rangeset() {
+        // Test equality between RangeSet and its frozen equivalent
+        let mut set = RangeSet::new();
+        set.insert_range(&Range::new(0, 5));
+        set.insert_range(&Range::new(10, 15));
+        let frozen = set.freeze();
+        
+        assert_eq!(set, frozen);
+        assert_eq!(frozen, set);
+        
+        // Test inequality when ranges are different
+        let mut set2 = RangeSet::new();
+        set2.insert_range(&Range::new(0, 6)); // Different from set
+        set2.insert_range(&Range::new(10, 15));
+        assert_ne!(set2, frozen);
+        assert_ne!(frozen, set2);
+        
+        // Test inequality when number of ranges is different
+        let mut set3 = RangeSet::new();
+        set3.insert_range(&Range::new(0, 5));
+        let frozen3 = set3.freeze();
+        assert_ne!(set, frozen3);
+        assert_ne!(frozen3, set);
+    }
+    #[test]
     fn test_chunks_gathers_multiple_discrete_ranges() {
         let mut set = range_set(&[0..=10, 90..=100]); // len=11, len=11
 
@@ -2074,6 +2312,42 @@ mod tests {
         assert_eq!(chunk[0], Range::new(0, 9));
         assert!(chunks.next().is_none());
         assert!(set.is_empty());
+    }
+
+    #[test]
+    fn test_chunks_edge_cases() {
+        // Test chunking with maximum values
+        let mut set = RangeSet::new();
+        set.insert_range(&Range::new(0, usize::MAX - 1)); // Very large range
+        
+        let mut chunks = set.into_chunks(1000);
+        let first_chunk = chunks.next().unwrap();
+        assert_eq!(first_chunk.len(), 1000);
+        
+        // Test chunking with single element ranges
+        let mut set2 = RangeSet::new();
+        set2.insert_range(&Range::new(0, 0));
+        set2.insert_range(&Range::new(2, 2));
+        set2.insert_range(&Range::new(4, 4));
+        
+        let chunks2: Vec<_> = set2.into_chunks(1).collect();
+        assert_eq!(chunks2.len(), 3);
+        assert_eq!(chunks2[0].len(), 1);
+        assert_eq!(chunks2[1].len(), 1);
+        assert_eq!(chunks2[2].len(), 1);
+    }
+
+    #[test]
+    fn test_chunks_large_block_size() {
+        let mut set = RangeSet::new();
+        set.insert_range(&Range::new(0, 5));
+        set.insert_range(&Range::new(10, 15));
+        set.insert_range(&Range::new(20, 25));
+
+        // Block size larger than all ranges combined
+        let chunks: Vec<_> = set.into_chunks(100).collect();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].len(), 18); // 6 + 6 + 6 elements
     }
 
     #[test]
@@ -2238,5 +2512,36 @@ mod tests {
         let (left7, right7) = range13.difference(&range14);
         assert_eq!(left7, None);
         assert_eq!(right7, Some(Range::new(1, 10)));
+    }
+
+    #[test]
+    fn test_offset_range_difference_additional_edge_cases() {
+        // Test with maximum values
+        let range1 = Range::new(0, usize::MAX);
+        let range2 = Range::new(1, usize::MAX - 1);
+        let (left, right) = range1.difference(&range2);
+        assert_eq!(left, Some(Range::new(0, 0)));
+        assert_eq!(right, Some(Range::new(usize::MAX, usize::MAX)));
+
+        // Test when other range extends beyond self
+        let range3 = Range::new(5, 10);
+        let range4 = Range::new(0, 15);
+        let (left2, right2) = range3.difference(&range4);
+        assert_eq!(left2, None);
+        assert_eq!(right2, None);
+
+        // Test with same start but different end
+        let range5 = Range::new(0, 10);
+        let range6 = Range::new(0, 5);
+        let (left3, right3) = range5.difference(&range6);
+        assert_eq!(left3, None);
+        assert_eq!(right3, Some(Range::new(6, 10)));
+
+        // Test with same end but different start
+        let range7 = Range::new(0, 10);
+        let range8 = Range::new(5, 10);
+        let (left4, right4) = range7.difference(&range8);
+        assert_eq!(left4, Some(Range::new(0, 4)));
+        assert_eq!(right4, None);
     }
 }
