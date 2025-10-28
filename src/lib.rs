@@ -362,6 +362,20 @@ impl PartialEq<RangeSet> for Range {
     fn eq(&self, other: &RangeSet) -> bool { other.eq(self) }
 }
 
+impl From<Range> for RangeSet {
+    /// Creates a `RangeSet` containing a single range.
+    ///
+    /// # Arguments
+    ///
+    /// * `rng` - The range to include in the set
+    #[inline]
+    fn from(rng: Range) -> Self {
+        let mut map = BTreeMap::new();
+        map.insert(rng.start, rng.last);
+        RangeSet(map)
+    }
+}
+
 /// A set of non-overlapping inclusive ranges.
 ///
 /// This data structure efficiently maintains a set of non-overlapping,
