@@ -1,8 +1,8 @@
 #![feature(btree_cursors)]
 use std::{
     collections::BTreeMap,
-    fmt::{self, Debug},
-    ops::{self, BitOr, BitOrAssign, Bound, Deref, Sub, SubAssign},
+    fmt::{self, Debug, Display},
+    ops::{self, BitOr, BitOrAssign, Bound, Deref, Not, Sub, SubAssign},
 };
 use thiserror::Error;
 
@@ -17,7 +17,7 @@ pub struct Range {
     last: usize,
 }
 
-impl fmt::Debug for Range {
+impl Debug for Range {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}..={}", self.start, self.last) }
 }
 
@@ -32,6 +32,7 @@ impl Range {
     /// # Panics
     ///
     /// Panics in debug builds if `start` > `last`.
+    #[must_use]
     #[inline]
     pub fn new(start: usize, last: usize) -> Self {
         debug_assert!(start <= last);
@@ -40,10 +41,12 @@ impl Range {
 
     /// Returns the start offset of the range.
     #[inline]
+    #[must_use]
     pub fn start(&self) -> usize { self.start }
 
     /// Returns the last offset of the range.
     #[inline]
+    #[must_use]
     pub fn last(&self) -> usize { self.last }
 
     /// Returns the length of the range.
@@ -56,13 +59,18 @@ impl Range {
     /// assert_eq!(range.len(), 6);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize { self.last - self.start + 1 }
+    #[must_use]
+    pub fn len(&self) -> usize {
+        debug_assert!(self.start <= self.last);
+        self.last - self.start + 1
+    }
 
     /// Always returns `false` because an `Range` is never empty.
     ///
     /// An `Range` is always considered non-empty because it represents
     /// an inclusive range from start to last where both ends are included.
     #[must_use]
+    #[inline]
     pub const fn is_empty(&self) -> bool { false }
 
     /// Checks if the range contains a specific offset.
@@ -75,6 +83,7 @@ impl Range {
     ///
     /// `true` if `n` is within the range (inclusive), `false` otherwise.
     #[inline]
+    #[must_use]
     pub fn contains_n(&self, n: usize) -> bool { self.start <= n && n <= self.last }
 
     /// Checks if the range contains another range.
@@ -87,6 +96,7 @@ impl Range {
     ///
     /// `true` if `other.start..=other.last` is completely within `self.start..=self.last`.
     #[inline]
+    #[must_use]
     pub fn contains(&self, other: &Self) -> bool { self.start <= other.start && self.last >= other.last }
 
     /// Checks if two ranges intersect.
@@ -101,6 +111,7 @@ impl Range {
     ///
     /// `true` if the ranges intersect, `false` otherwise.
     #[inline]
+    #[must_use]
     pub fn intersects(&self, other: &Self) -> bool { self.start <= other.last && self.last >= other.start }
 
     /// Checks if two ranges intersect or are adjacent.
@@ -115,6 +126,7 @@ impl Range {
     ///
     /// `true` if the ranges intersect or are adjacent, `false` otherwise.
     #[inline]
+    #[must_use]
     fn intersects_or_adjacent(&self, other: &Self) -> bool {
         self.start.saturating_sub(1) <= other.last && other.start.saturating_sub(1) <= self.last
     }
@@ -144,6 +156,7 @@ impl Range {
     /// assert!(!range3.is_adjacent(&range4));
     /// ```
     #[inline]
+    #[must_use]
     pub fn is_adjacent(&self, other: &Self) -> bool {
         (self.last < usize::MAX && self.last + 1 == other.start)
             || (other.last < usize::MAX && other.last + 1 == self.start)
@@ -164,6 +177,7 @@ impl Range {
     /// assert_eq!(range.midpoint(), 6);
     /// ```
     #[inline]
+    #[must_use]
     pub fn midpoint(&self) -> usize { self.start + (self.last - self.start) / 2 }
 
     /// Returns the intersection of two ranges.
@@ -191,11 +205,12 @@ impl Range {
     /// assert!(range1.intersection(&range3).is_none());
     /// ```
     #[inline]
+    #[must_use]
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         self.intersects(other).then(|| {
             let start = self.start.max(other.start);
             let last = self.last.min(other.last);
-            Range::new(start, last)
+            Self::new(start, last)
         })
     }
 
@@ -237,33 +252,13 @@ impl Range {
     /// assert_eq!(right3, None);
     /// ```
     #[inline]
+    #[must_use]
     pub fn difference(&self, other: &Self) -> (Option<Self>, Option<Self>) {
         if !self.intersects(other) {
             return (Some(*self), None);
         }
-
-        let left = if self.start < other.start {
-            // Check for overflow when subtracting 1
-            if other.start > 0 {
-                Some(Range::new(self.start, other.start - 1))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let right = if self.last > other.last {
-            // Check for overflow when adding 1
-            if other.last < usize::MAX {
-                Some(Range::new(other.last + 1, self.last))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
+        let left = (self.start < other.start && other.start > 0).then(|| Self::new(self.start, other.start - 1));
+        let right = (self.last > other.last && other.last < usize::MAX).then(|| Self::new(other.last + 1, self.last));
         (left, right)
     }
 
@@ -280,11 +275,12 @@ impl Range {
     ///
     /// `Some(range)` with the merged range if successful, `None` otherwise.
     #[inline]
+    #[must_use]
     pub fn union(&self, other: &Self) -> Option<Self> {
         self.intersects_or_adjacent(other).then_some({
             let start = self.start.min(other.start);
             let last = self.last.max(other.last);
-            Range::new(start, last)
+            Self::new(start, last)
         })
     }
 }
@@ -316,7 +312,7 @@ impl TryFrom<&ops::Range<usize>> for Range {
     fn try_from(rng: &ops::Range<usize>) -> Result<Self, Self::Error> {
         let start = rng.start;
         let last = rng.end.checked_sub(1).ok_or(Error::IndexOverflow)?;
-        Ok(Range::new(start, last))
+        Ok(Self::new(start, last))
     }
 }
 
@@ -341,10 +337,7 @@ impl From<(usize, usize)> for Range {
     ///
     /// Panics in debug builds if the start value is greater than the last value.
     #[inline]
-    fn from(rng: (usize, usize)) -> Self {
-        debug_assert!(rng.0 <= rng.1);
-        Self { start: rng.0, last: rng.1 }
-    }
+    fn from((start, last): (usize, usize)) -> Self { Self::new(start, last) }
 }
 
 impl PartialEq<Range> for RangeSet {
@@ -353,8 +346,8 @@ impl PartialEq<Range> for RangeSet {
         if self.ranges_count() != 1 {
             return false;
         }
-        let (start, last) = unsafe { self.0.first_key_value().unwrap_unchecked() };
-        *start == other.start() && *last == other.last()
+        let (&start, &last) = unsafe { self.0.first_key_value().unwrap_unchecked() };
+        start == other.start() && last == other.last()
     }
 }
 
@@ -448,7 +441,7 @@ impl RangeSet {
     ///
     /// The start offset of the first range, or `None` if the set is empty.
     #[inline]
-    pub fn start(&self) -> Option<usize> { self.0.iter().next().map(|(start, _)| *start) }
+    pub fn start(&self) -> Option<usize> { self.0.first_key_value().map(|(start, _)| *start) }
 
     /// Returns the end offset of the last range in the set.
     ///
@@ -456,7 +449,7 @@ impl RangeSet {
     ///
     /// The last offset of the last range, or `None` if the set is empty.
     #[inline]
-    pub fn last(&self) -> Option<usize> { self.0.iter().next_back().map(|(_, last)| *last) }
+    pub fn last(&self) -> Option<usize> { self.0.last_key_value().map(|(_, last)| *last) }
 
     /// Checks if the set contains a specific offset.
     ///
@@ -523,7 +516,7 @@ impl RangeSet {
     pub fn insert_range(&mut self, rng: &Range) -> bool {
         // Position the cursor at the first position that might intersect with rng
         let mut cursor = self.0.upper_bound_mut(Bound::Included(&rng.start));
-        if let Some(prev) = cursor.peek_prev().map(|(l, r)| Range::from((*l, *r)))
+        if let Some(prev) = cursor.peek_prev().map(|(start, last)| Range::from((*start, *last)))
             && prev.intersects_or_adjacent(rng)
         {
             cursor.prev();
@@ -532,7 +525,7 @@ impl RangeSet {
         // We only need to check the element at the current cursor position.
         // If that element (the first one that might intersect) already contains
         // the new range, then the insertion is a no-op, so return false.
-        if let Some(next) = cursor.peek_next().map(|(l, r)| Range::from((*l, *r)))
+        if let Some(next) = cursor.peek_next().map(|(start, last)| Range::from((*start, *last)))
             && next.contains(rng)
         {
             return false;
@@ -542,22 +535,21 @@ impl RangeSet {
         // will necessarily modify the set
         let mut merged_rng = *rng;
         // Continue looping as long as the next element exists and intersects with our range
-        while cursor
-            .peek_next()
-            .map(|(l, r)| Range::from((*l, *r)))
-            .is_some_and(|next| merged_rng.intersects_or_adjacent(&next))
-        {
-            // SAFETY: We've confirmed `peek_next()` returns `Some` in the loop condition,
-            // so calling `remove_next()` will not panic. Using `unwrap_unchecked` is a
-            // micro-optimization to avoid a redundant check.
-            let rng_to_merge: Range = unsafe { cursor.remove_next().unwrap_unchecked().into() };
-            // SAFETY: The loop condition `intersects_or_adjacent` guarantees that `merge`
-            // will return `Some`, so this unwrap is safe.
-            merged_rng = unsafe { merged_rng.union(&rng_to_merge).unwrap_unchecked() };
-        }
         unsafe {
-            // safety:
-            cursor.insert_after(merged_rng.start, merged_rng.last).unwrap_unchecked()
+            while cursor
+                .peek_next()
+                .map(|(start, last)| Range::new(*start, *last))
+                .is_some_and(|next| merged_rng.intersects_or_adjacent(&next))
+            {
+                // SAFETY: We've confirmed `peek_next()` returns `Some` in the loop condition,
+                // so calling `remove_next()` will not panic. Using `unwrap_unchecked` is a
+                // micro-optimization to avoid a redundant check.
+                let rng_to_merge: Range = cursor.remove_next().unwrap_unchecked().into();
+                // SAFETY: The loop condition `intersects_or_adjacent` guarantees that `merge`
+                // will return `Some`, so this unwrap is safe.
+                merged_rng = merged_rng.union(&rng_to_merge).unwrap_unchecked();
+            }
+            cursor.insert_after(merged_rng.start, merged_rng.last).unwrap_unchecked();
         };
         true
     }
@@ -652,17 +644,17 @@ impl RangeSet {
     #[must_use]
     #[inline]
     pub fn union(&self, other: &Self) -> Self {
-        if self.0.is_empty() {
+        if self.is_empty() {
             return other.clone();
         }
-        if other.0.is_empty() {
+        if other.is_empty() {
             return self.clone();
         }
-        let self_rngs_count = self.0.len();
-        let other_rngs_count = other.0.len();
-        let insert_cost_estimate = other_rngs_count * self_rngs_count.ilog2() as usize;
-        let merge_cost_estimate = self_rngs_count + other_rngs_count;
-        if insert_cost_estimate < merge_cost_estimate && other_rngs_count < self_rngs_count {
+        let self_rng_count = self.ranges_count();
+        let other_rng_count = other.ranges_count();
+        let insert_cost_estimate = other_rng_count * self_rng_count.ilog2() as usize;
+        let merge_cost_estimate = self_rng_count + other_rng_count;
+        if insert_cost_estimate < merge_cost_estimate && other_rng_count < self_rng_count {
             let mut result = self.clone();
             for (&start, &last) in &other.0 {
                 result.insert_range(&Range::new(start, last));
@@ -686,11 +678,11 @@ impl RangeSet {
         if other.0.is_empty() {
             return;
         }
-        let self_rngs_count = self.0.len();
-        let other_rngs_count = other.0.len();
-        let insert_cost_estimate = other_rngs_count * self_rngs_count.ilog2() as usize;
-        let merge_cost_estimate = self_rngs_count + other_rngs_count;
-        if insert_cost_estimate < merge_cost_estimate && other_rngs_count < self_rngs_count {
+        let self_rng_count = self.ranges_count();
+        let other_rng_count = other.ranges_count();
+        let insert_cost_estimate = other_rng_count * self_rng_count.ilog2() as usize;
+        let merge_cost_estimate = self_rng_count + other_rng_count;
+        if insert_cost_estimate < merge_cost_estimate && other_rng_count < self_rng_count {
             for (&start, &last) in &other.0 {
                 self.insert_range(&Range::new(start, last));
             }
@@ -712,66 +704,66 @@ impl RangeSet {
     /// A new `RangeSet` containing the difference.
     #[must_use]
     pub fn difference(&self, other: &Self) -> Self {
-        if self.0.is_empty() || other.0.is_empty() {
+        if self.is_empty() || other.is_empty() {
             return self.clone();
         }
 
         let mut result = RangeSet::new();
-        let mut a_iter = self.0.iter();
-        let mut b_iter = other.0.iter().peekable();
+        let mut a_it = self.0.iter();
+        let mut b_it = other.0.iter().peekable();
 
         // Get the first range from A
-        let mut current_a = match a_iter.next() {
-            Some((&start, &last)) => Range::new(start, last),
-            None => return result, // A is empty
+        let mut cur_a = unsafe {
+            let (&start, &last) = a_it.next().unwrap_unchecked();
+            Range::new(start, last)
         };
 
         loop {
             // Look at B's next range
-            match b_iter.peek() {
+            match b_it.peek() {
                 // B still has ranges
                 Some(&(&b_start, &b_last)) => {
                     let b_range = Range::new(b_start, b_last);
 
                     // If b_range is completely before current_a, skip this b_range
-                    if b_range.last() < current_a.start() {
-                        b_iter.next(); // Consume b_range
+                    if b_range.last() < cur_a.start() {
+                        b_it.next(); // Consume b_range
                         continue;
                     }
 
                     // If b_range is completely after current_a, current_a won't be trimmed further
                     // Complete processing of current_a, then try to get the next from A
-                    if b_range.start() > current_a.last() {
-                        result.insert_range(&current_a);
-                        if let Some((&s, &l)) = a_iter.next() {
-                            current_a = Range::new(s, l);
+                    if b_range.start() > cur_a.last() {
+                        result.insert_range(&cur_a);
+                        if let Some((&s, &l)) = a_it.next() {
+                            cur_a = Range::new(s, l);
                             continue;
                         } else {
                             break;
                         }
                     }
                     // If b_range leaves a part before it in current_a
-                    if b_range.start() > current_a.start() {
-                        let prefix = Range::new(current_a.start(), b_range.start() - 1);
+                    if b_range.start() > cur_a.start() {
+                        let prefix = Range::new(cur_a.start(), b_range.start() - 1);
                         result.insert_range(&prefix);
                     }
                     // Update current_a's start, skipping the part covered by b_range
                     // If b_range.last() overflows, it means current_a is completely covered
                     if let Some(new_start) = b_range.last().checked_add(1) {
                         // If new_start is beyond current_a's range
-                        if new_start > current_a.last() {
+                        if new_start > cur_a.last() {
                             // current_a is completely processed, get the next one
-                            current_a = match a_iter.next() {
+                            cur_a = match a_it.next() {
                                 Some((&s, &l)) => Range::new(s, l),
                                 None => break, // A exhausted, end
                             };
                         } else {
                             // current_a still has remainder, update start and continue processing
-                            current_a = Range::new(new_start, current_a.last());
+                            cur_a = Range::new(new_start, cur_a.last());
                         }
                     } else {
                         // b_range.last() is usize::MAX, no remainder possible after current_a
-                        current_a = match a_iter.next() {
+                        cur_a = match a_it.next() {
                             Some((&s, &l)) => Range::new(s, l),
                             None => break, // A exhausted, end
                         };
@@ -779,8 +771,8 @@ impl RangeSet {
                 }
                 // B is exhausted, all remaining ranges in A belong to the result
                 None => {
-                    result.insert_range(&current_a);
-                    for (&start, &last) in a_iter {
+                    result.insert_range(&cur_a);
+                    for (&start, &last) in a_it {
                         result.insert_range(&Range::new(start, last));
                     }
                     break; // End main loop
@@ -886,7 +878,6 @@ impl RangeSet {
         if self.0.is_empty() || other.is_empty() {
             return;
         }
-
         let other_set: RangeSet = other.clone().into();
         self.difference_assign(&other_set);
     }
@@ -1003,7 +994,7 @@ impl Iterator for ChunkedMutIter<'_> {
     /// A boxed slice of ranges representing the next chunk, or `None`
     /// if the set has been fully consumed.
     fn next(&mut self) -> Option<Self::Item> {
-        if self.inner.0.is_empty() {
+        if self.inner.is_empty() {
             return None;
         }
         let mut chunk_rngs = Vec::with_capacity(1);
@@ -1038,11 +1029,7 @@ impl Iterator for ChunkedMutIter<'_> {
         }
         // If we successfully got any data from the BTreeMap,
         // return the constructed chunk, otherwise return None.
-        if chunk_rngs.is_empty() {
-            None
-        } else {
-            Some(FrozenRangeSet(chunk_rngs.into_boxed_slice()))
-        }
+        chunk_rngs.is_empty().not().then(|| FrozenRangeSet(chunk_rngs.into_boxed_slice()))
     }
 }
 
@@ -1170,7 +1157,7 @@ impl RangeSet {
         if self.0.is_empty() {
             return None;
         }
-        let parts: Vec<String> = self.0.iter().map(|(&start, &last)| format!("{}-{}", start, last)).collect();
+        let parts: Box<[String]> = self.0.iter().map(|(&start, &last)| format!("{}-{}", start, last)).collect();
         Some(format!("bytes={}", parts.join(",")).into_boxed_str())
     }
 }
@@ -1318,7 +1305,7 @@ impl FrozenRangeSet {
         if self.is_empty() {
             return None;
         }
-        let parts: Vec<String> = self.iter().map(|range| format!("{}-{}", range.start(), range.last())).collect();
+        let parts: Box<[String]> = self.iter().map(|range| format!("{}-{}", range.start(), range.last())).collect();
         Some(format!("bytes={}", parts.join(",")).into_boxed_str())
     }
 }
@@ -1379,6 +1366,98 @@ impl PartialEq<FrozenRangeSet> for Range {
     fn eq(&self, other: &FrozenRangeSet) -> bool { other.eq(self) }
 }
 
+const BINARY_BASE: usize = 1024;
+const BINARY_UNIT_TABLE: [(usize, &str); 7] = [
+    (1, "B"),
+    (BINARY_BASE, "KiB"),
+    (BINARY_BASE.pow(2), "MiB"),
+    (BINARY_BASE.pow(3), "GiB"),
+    (BINARY_BASE.pow(4), "TiB"),
+    (BINARY_BASE.pow(5), "PiB"),
+    (BINARY_BASE.pow(6), "EiB"),
+];
+
+const SI_BASE: usize = 1000;
+const SI_UNIT_TABLE: [(usize, &str); 7] = [
+    (1, "B"),
+    (SI_BASE, "KB"),
+    (SI_BASE.pow(2), "MB"),
+    (SI_BASE.pow(3), "GB"),
+    (SI_BASE.pow(4), "TB"),
+    (SI_BASE.pow(5), "PB"),
+    (SI_BASE.pow(6), "EB"),
+];
+
+fn analyze_bytes(size: usize, use_binary: bool) -> (f64, &'static str, usize) {
+    if size == 0 {
+        return (0., "B", 1);
+    }
+    let (base, unit_table) = if use_binary {
+        (BINARY_BASE as f64, &BINARY_UNIT_TABLE)
+    } else {
+        (SI_BASE as f64, &SI_UNIT_TABLE)
+    };
+    let exp = if size > 0 {
+        (size as f64).log(base).floor() as usize
+    } else {
+        0
+    };
+    let idx = exp.min(unit_table.len() - 1);
+    let (unit_base, unit_name) = unit_table[idx];
+    let val = size as f64 / unit_base as f64;
+    (val, unit_name, unit_base)
+}
+
+impl Display for Range {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let use_binary = !f.alternate();
+        let (start_val, start_unit, start_base) = analyze_bytes(self.start, use_binary);
+        let (last_val, last_unit, last_base) = analyze_bytes(self.last, use_binary);
+        let format_num_part = |original_size: usize, val: f64, base: usize| -> String {
+            match () {
+                _ if original_size < if use_binary { BINARY_BASE } else { SI_BASE } => format!("{original_size}"),
+                _ if base > 1 && original_size.is_multiple_of(base) => format!("{original_size}"),
+                _ => format!("{:.2}", val),
+            }
+        };
+        let start_num_str = format_num_part(self.start, start_val, start_base);
+        let last_num_str = format_num_part(self.last, last_val, last_base);
+        match () {
+            _ if self.start == self.last => write!(f, "{} {}", start_num_str, start_unit),
+            _ if start_unit == last_unit => write!(f, "{} ~ {} {}", start_num_str, last_num_str, start_unit),
+            _ => write!(f, "{} {} ~ {} {}", start_num_str, start_unit, last_num_str, last_unit),
+        }
+    }
+}
+
+impl Display for RangeSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut first = true;
+        for (&start, &last) in &self.0 {
+            if !first {
+                f.write_str(", ")?;
+            }
+            write!(f, "{}", Range::new(start, last))?;
+            first = false;
+        }
+        Ok(())
+    }
+}
+
+impl Display for FrozenRangeSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut first = true;
+        for rng in self.0.iter() {
+            if !first {
+                f.write_str(", ")?;
+            }
+            write!(f, "{}", rng)?;
+            first = false;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{Error, Range, RangeSet};
@@ -1389,6 +1468,16 @@ mod tests {
     }
 
     fn range_set(ranges: &[RangeInclusive<usize>]) -> RangeSet { RangeSet(btree_set(ranges)) }
+
+    #[test]
+    fn test_new() {
+        println!("{:#}", Range::new(49398, 321732618));
+        println!("{}", Range::new(0, 0));
+        println!("{:#}", Range::new(49398, 49399));
+        println!("{:#?}", Range::new(49398, 321732618));
+        let set = RangeSet::from_iter([Range::new(0, 5), Range::new(10, 15), Range::new(20, 25)]);
+        println!("RangeSet: {}", set);
+    }
 
     #[test]
     fn test_offset_range_new() {
@@ -2694,8 +2783,6 @@ mod frozen_rangeset_tests {
 
     #[test]
     fn test_rangeset_frozen_rangeset_union() {
-        // 测试 RangeSet 和 FrozenRangeSet 的并集
-        // Fix: Test union of RangeSet and FrozenRangeSet
         let mut range_set = RangeSet::new();
         range_set.insert_range(&Range::new(0, 5));
         range_set.insert_range(&Range::new(15, 20));
@@ -2707,8 +2794,6 @@ mod frozen_rangeset_tests {
 
         let union_result = range_set.union_frozen(&frozen_set);
         assert_eq!(union_result.ranges_count(), 3);
-        // 合并后应该有三个区间: 0-10, 15-20, 25-30
-        // Fix: After merging, there should be three ranges: 0-10, 15-20, 25-30
         assert!(union_result.contains(&Range::new(0, 10)));
         assert!(union_result.contains(&Range::new(15, 20)));
         assert!(union_result.contains(&Range::new(25, 30)));
@@ -2716,8 +2801,6 @@ mod frozen_rangeset_tests {
 
     #[test]
     fn test_rangeset_frozen_rangeset_union_assign() {
-        // 测试 RangeSet 和 FrozenRangeSet 的并集赋值操作
-        // Fix: Test union assignment operation of RangeSet and FrozenRangeSet
         let mut range_set = RangeSet::new();
         range_set.insert_range(&Range::new(0, 5));
         range_set.insert_range(&Range::new(15, 20));
@@ -2729,8 +2812,6 @@ mod frozen_rangeset_tests {
 
         range_set.union_assign_frozen(&frozen_set);
         assert_eq!(range_set.ranges_count(), 3);
-        // 合并后应该有三个区间: 0-10, 15-20, 25-30
-        // Fix: After merging, there should be three ranges: 0-10, 15-20, 25-30
         assert!(range_set.contains(&Range::new(0, 10)));
         assert!(range_set.contains(&Range::new(15, 20)));
         assert!(range_set.contains(&Range::new(25, 30)));
@@ -2738,8 +2819,6 @@ mod frozen_rangeset_tests {
 
     #[test]
     fn test_rangeset_frozen_rangeset_difference() {
-        // 测试 RangeSet 和 FrozenRangeSet 的差集
-        // Fix: Test difference of RangeSet and FrozenRangeSet
         let mut range_set = RangeSet::new();
         range_set.insert_range(&Range::new(0, 100));
 
@@ -2757,8 +2836,6 @@ mod frozen_rangeset_tests {
 
     #[test]
     fn test_rangeset_frozen_rangeset_difference_assign() {
-        // 测试 RangeSet 和 FrozenRangeSet 的差集赋值操作
-        // Fix: Test difference assignment operation of RangeSet and FrozenRangeSet
         let mut range_set = RangeSet::new();
         range_set.insert_range(&Range::new(0, 100));
 
@@ -2776,8 +2853,6 @@ mod frozen_rangeset_tests {
 
     #[test]
     fn test_rangeset_frozen_rangeset_union_operators() {
-        // 测试 RangeSet 和 FrozenRangeSet 的并集运算符
-        // Fix: Test union operators of RangeSet and FrozenRangeSet
         let mut range_set = RangeSet::new();
         range_set.insert_range(&Range::new(0, 5));
 
@@ -2785,8 +2860,6 @@ mod frozen_rangeset_tests {
         frozen_set.insert_range(&Range::new(10, 15));
         let frozen_set = frozen_set.freeze();
 
-        // 测试各种运算符形式
-        // Fix: Test various operator forms
         let result1 = &range_set | &frozen_set;
         range_set |= &frozen_set;
 
@@ -2801,8 +2874,6 @@ mod frozen_rangeset_tests {
 
     #[test]
     fn test_rangeset_frozen_rangeset_difference_operators() {
-        // 测试 RangeSet 和 FrozenRangeSet 的差集运算符
-        // Fix: Test difference operators of RangeSet and FrozenRangeSet
         let mut range_set = RangeSet::new();
         range_set.insert_range(&Range::new(0, 100));
 
@@ -2810,8 +2881,6 @@ mod frozen_rangeset_tests {
         frozen_set.insert_range(&Range::new(10, 20));
         let frozen_set = frozen_set.freeze();
 
-        // 测试各种运算符形式
-        // Fix: Test various operator forms
         let result1 = &range_set - &frozen_set;
         range_set -= &frozen_set;
 
@@ -2826,36 +2895,26 @@ mod frozen_rangeset_tests {
 
     #[test]
     fn test_rangeset_frozen_rangeset_empty_cases() {
-        // 测试边界情况
-        // Fix: Test edge cases
         let range_set = RangeSet::new();
 
         let mut frozen_set = RangeSet::new();
         frozen_set.insert_range(&Range::new(0, 5));
         let frozen_set = frozen_set.freeze();
 
-        // 空集与非空 FrozenRangeSet 的并集
-        // Fix: Union of empty set with non-empty FrozenRangeSet
         let union_result = range_set.union_frozen(&frozen_set);
         assert_eq!(union_result.ranges_count(), 1);
         assert!(union_result.contains(&Range::new(0, 5)));
 
-        // 空集与非空 FrozenRangeSet 的差集
-        // Fix: Difference of empty set with non-empty FrozenRangeSet
         let diff_result = range_set.difference_frozen(&frozen_set);
         assert!(diff_result.is_empty());
 
         let mut range_set2 = RangeSet::new();
         range_set2.insert_range(&Range::new(10, 20));
 
-        // 非空 RangeSet 与空 FrozenRangeSet 的并集
-        // Fix: Union of non-empty RangeSet with empty FrozenRangeSet
         let union_result2 = range_set2.union_frozen(&RangeSet::new().freeze());
         assert_eq!(union_result2.ranges_count(), 1);
         assert!(union_result2.contains(&Range::new(10, 20)));
 
-        // 非空 RangeSet 与空 FrozenRangeSet 的差集
-        // Fix: Difference of non-empty RangeSet with empty FrozenRangeSet
         let diff_result2 = range_set2.difference_frozen(&RangeSet::new().freeze());
         assert_eq!(diff_result2.ranges_count(), 1);
         assert!(diff_result2.contains(&Range::new(10, 20)));
