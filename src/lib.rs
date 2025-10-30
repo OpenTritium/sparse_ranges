@@ -1434,21 +1434,21 @@ fn analyze_bytes(size: usize, use_binary: bool) -> (f64, &'static str, usize) {
 impl Display for Range {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let use_binary = !f.alternate();
-        let (start_val, start_unit, start_base) = analyze_bytes(self.start, use_binary);
-        let (last_val, last_unit, last_base) = analyze_bytes(self.last, use_binary);
-        let format_num_part = |original_size: usize, val: f64, base: usize| -> String {
-            match () {
-                () if original_size < if use_binary { BINARY_BASE } else { SI_BASE } => format!("{original_size}"),
-                () if base > 1 && original_size.is_multiple_of(base) => format!("{original_size}"),
-                () => format!("{val:.2}"),
+        let (_last_val_temp, common_unit, unit_base) = analyze_bytes(self.last, use_binary);
+        let unit_base_f64 = unit_base as f64;
+        let format_num = |val: f64| -> String {
+            if (val.fract()).abs() < 1e-9 {
+                format!("{val:.0}")
+            } else {
+                format!("{val:.2}")
             }
         };
-        let start_num_str = format_num_part(self.start, start_val, start_base);
-        let last_num_str = format_num_part(self.last, last_val, last_base);
-        match () {
-            () if self.start == self.last => write!(f, "{start_num_str} {start_unit}"),
-            () if start_unit == last_unit => write!(f, "{start_num_str} ~ {last_num_str} {start_unit}"),
-            () => write!(f, "{start_num_str} {start_unit} ~ {last_num_str} {last_unit}"),
+        let start_val = self.start as f64 / unit_base_f64;
+        let last_val = self.last as f64 / unit_base_f64;
+        if self.start == self.last {
+            write!(f, "{} {}", format_num(start_val), common_unit)
+        } else {
+            write!(f, "{} ~ {} {}", format_num(start_val), format_num(last_val), common_unit)
         }
     }
 }
