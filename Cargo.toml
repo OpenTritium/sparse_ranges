@@ -1,6 +1,6 @@
 [package]
 name = "sparse_ranges"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 description = "Efficient sparse range set operations, particularly designed for HTTP range requests and file offset management"
 repository = "https://github.com/OpenTritium/sparse_ranges"
