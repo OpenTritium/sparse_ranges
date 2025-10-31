@@ -8,7 +8,7 @@
 
 use std::{
     collections::BTreeMap,
-    fmt::{self, Debug, Display},
+    fmt::{self, Debug},
     ops::{self, BitOr, BitOrAssign, Bound, Deref, Not, Sub, SubAssign},
 };
 use thiserror::Error;
@@ -22,10 +22,6 @@ use thiserror::Error;
 pub struct Range {
     start: usize,
     last: usize,
-}
-
-impl Debug for Range {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}..={}", self.start, self.last) }
 }
 
 impl Range {
@@ -970,16 +966,6 @@ impl Sub<Self> for &RangeSet {
     fn sub(self, rhs: Self) -> Self::Output { self.difference(rhs) }
 }
 
-impl fmt::Debug for RangeSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut set_builder = f.debug_set();
-        for (&start, &last) in &self.0 {
-            set_builder.entry(&(start..=last));
-        }
-        set_builder.finish()
-    }
-}
-
 /// An iterator that chunks an `RangeSet` into fixed-size blocks.
 ///
 /// This iterator consumes an `RangeSet` and produces chunks of ranges
@@ -1182,16 +1168,6 @@ impl RangeSet {
 
 #[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct FrozenRangeSet(Box<[Range]>);
-
-impl Debug for FrozenRangeSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut set_builder = f.debug_set();
-        for range in &self.0 {
-            set_builder.entry(&(range.start()..=range.last()));
-        }
-        set_builder.finish()
-    }
-}
 
 impl Deref for FrozenRangeSet {
     type Target = [Range];
@@ -1431,7 +1407,7 @@ fn analyze_bytes(size: usize, use_binary: bool) -> (f64, &'static str, usize) {
     (val, unit_name, unit_base)
 }
 
-impl Display for Range {
+impl Debug for Range {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let use_binary = !f.alternate();
         let (_last_val_temp, common_unit, unit_base) = analyze_bytes(self.last, use_binary);
@@ -1453,28 +1429,28 @@ impl Display for Range {
     }
 }
 
-impl Display for RangeSet {
+impl Debug for RangeSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
         for (&start, &last) in &self.0 {
             if !first {
                 f.write_str(", ")?;
             }
-            write!(f, "{}", Range::new(start, last))?;
+            write!(f, "{:?}", Range::new(start, last))?;
             first = false;
         }
         Ok(())
     }
 }
 
-impl Display for FrozenRangeSet {
+impl Debug for FrozenRangeSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
         for rng in &self.0 {
             if !first {
                 f.write_str(", ")?;
             }
-            write!(f, "{rng}")?;
+            write!(f, "{rng:?}")?;
             first = false;
         }
         Ok(())
