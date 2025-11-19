@@ -38,7 +38,19 @@ impl Range {
     #[must_use]
     #[inline]
     pub fn new(start: usize, last: usize) -> Self {
-        debug_assert!(start <= last);
+        assert!(start <= last, "start must be less than or equal to last");
+        Self { start, last }
+    }
+
+    #[must_use]
+    #[inline]
+    /// Creates a new range without checking if start <= last.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `start` is less than or equal to `last`.
+    pub const unsafe fn new_unchecked(start: usize, last: usize) -> Self {
+        debug_assert!(start <= last, "start must be less than or equal to last");
         Self { start, last }
     }
 
@@ -563,6 +575,43 @@ impl RangeSet {
             cursor.insert_after(merged_rng.start, merged_rng.last).unwrap_unchecked();
         };
         true
+    }
+
+    /// Inserts `n` consecutive elements starting at offset `at`.
+    ///
+    /// This is a convenience method that creates a range from `at` to `at + n - 1`
+    /// and inserts it into the set. If the resulting range overlaps or is adjacent
+    /// to existing ranges, they will be merged. If the range is already fully
+    /// contained in the set, nothing is changed.
+    ///
+    /// If `n` is 0, this method does nothing.
+    ///
+    /// # Arguments
+    ///
+    /// * `n` - The number of consecutive elements to insert
+    /// * `at` - The starting offset where elements should be inserted
+    ///
+    /// # Returns
+    ///
+    /// Nothing is returned. If `n` is 0, this method does nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{RangeSet, Range};
+    /// let mut set = RangeSet::new();
+    /// set.insert_n_at(5, 10);
+    /// // This inserts elements 10, 11, 12, 13, 14
+    ///
+    /// assert!(set.contains(&Range::new(10, 14)));
+    /// assert!(!set.contains(&Range::new(10, 15))); // 15 is not included
+    /// ```
+    pub fn insert_n_at(&mut self, n: usize, at: usize) {
+        if n == 0 {
+            return;
+        }
+        let rng = unsafe { Range::new_unchecked(at, at + n - 1) };
+        self.insert_range(&rng);
     }
 
     /// Computes the union of two sets by merging all ranges.
@@ -1788,6 +1837,47 @@ mod tests {
         let inserted = set.insert_range(&Range::new(10, 20));
         assert!(!inserted, "Should not insert a duplicate range");
         assert_eq!(set.0, btree_set(&[(10..=20)]));
+    }
+
+    #[test]
+    fn test_insert_n_at() {
+        let mut set = RangeSet::new();
+
+        // Test basic insertion
+        set.insert_n_at(5, 10); // Insert 5 elements starting at 10 (10,11,12,13,14)
+        assert_eq!(set.len(), 5);
+        assert!(set.contains(&Range::new(10, 14)));
+        assert!(!set.contains(&Range::new(10, 15))); // 15 is not included
+        assert!(!set.contains(&Range::new(9, 14))); // 9 is not included
+
+        // Test inserting adjacent range before
+        set.insert_n_at(3, 7); // Insert 3 elements starting at 7 (7,8,9)
+        assert_eq!(set.len(), 8); // 5 + 3
+        assert!(set.contains(&Range::new(7, 14)));
+
+        // Test inserting adjacent range after
+        set.insert_n_at(2, 15); // Insert 2 elements starting at 15 (15,16)
+        assert_eq!(set.len(), 10); // 8 + 2
+        assert!(set.contains(&Range::new(7, 16)));
+
+        // Test inserting overlapping range
+        set.insert_n_at(4, 14); // Insert 4 elements starting at 14 (14,15,16,17)
+        assert_eq!(set.len(), 11); // 7..=17 = 11 elements
+        assert!(set.contains(&Range::new(7, 17)));
+
+        // Test inserting with n=0 (should do nothing)
+        set.insert_n_at(0, 20);
+        assert_eq!(set.len(), 11); // No change
+    }
+
+    #[test]
+    fn test_insert_n_at_zero() {
+        let mut set = RangeSet::new();
+
+        // Test inserting 0 elements
+        set.insert_n_at(0, 10);
+        assert!(set.is_empty());
+        assert_eq!(set.len(), 0);
     }
 
     #[test]
