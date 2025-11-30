@@ -497,7 +497,7 @@ dependencies = [
 
 [[package]]
 name = "sparse_ranges"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "criterion",
  "http-range-header",

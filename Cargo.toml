@@ -1,6 +1,6 @@
 [package]
 name = "sparse_ranges"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2024"
 description = "Efficient sparse range set operations, particularly designed for HTTP range requests and file offset management"
 repository = "https://github.com/OpenTritium/sparse_ranges"
@@ -13,16 +13,16 @@ harness = false
 name = "insert"
 
 [[bench]]
+harness = false
 name = "union"
-harness = false
 
 [[bench]]
+harness = false
 name = "diff"
-harness = false
 
 [[bench]]
-name = "chunk"
 harness = false
+name = "chunk"
 
 [dependencies]
 http-range-header = { version = "0.4.2", optional = true }
