@@ -5,6 +5,7 @@
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::similar_names)]
+#![cfg_attr(feature = "serde", allow(clippy::unsafe_derive_deserialize))]
 
 use std::{
     collections::BTreeMap,
@@ -13,12 +14,16 @@ use std::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// An inclusive range defined by start and last offsets.
 ///
 /// This struct represents a contiguous range of unsigned integers where both
 /// the start and end points are included in the range. It provides various
 /// utility methods for manipulating and querying ranges.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Range {
     start: usize,
     last: usize,
@@ -342,7 +347,7 @@ impl TryFrom<&ops::Range<usize>> for Range {
     ///
     /// Returns an error if the range end would cause an overflow when converted
     /// to an inclusive range (e.g., when `end` is 0 and we try to compute `end - 1`),
-    /// or if the resulting range would be invalid (start > last or last >= usize::MAX).
+    /// or if the resulting range would be invalid (start > last or last >= `usize::MAX`).
     #[inline]
     fn try_from(rng: &ops::Range<usize>) -> Result<Self, Self::Error> {
         let start = rng.start;
@@ -460,6 +465,7 @@ impl From<Range> for RangeSet {
 /// // The set now contains two separate ranges
 /// ```
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RangeSet(BTreeMap<usize, usize>);
 
 impl Debug for RangeSet {
@@ -1110,9 +1116,7 @@ impl RangeSet {
         let other_set: Self = other.clone().into();
         self.difference_assign(&other_set);
     }
-}
 
-impl RangeSet {
     /// Creates a frozen version of the range set.
     ///
     /// A frozen range set is an immutable snapshot of the current range set
@@ -1491,6 +1495,7 @@ impl RangeSet {
 /// - Share ranges between multiple threads without locks
 /// - Cache intermediate results of range operations
 #[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FrozenRangeSet(Box<[Range]>);
 
 impl Deref for FrozenRangeSet {
@@ -1976,6 +1981,7 @@ impl Debug for FrozenRangeSet {
     }
 }
 #[cfg(test)]
+#[allow(clippy::pedantic)]
 mod tests {
     use crate::{Error, FrozenRangeSet, Range, RangeSet};
 
@@ -2349,7 +2355,7 @@ mod tests {
         s3 |= &f2;
         check_ranges(&s3, &[(0, 15)]);
 
-        let mut s4 = s1.clone();
+        let mut s4 = s1;
         s4 -= &f2;
         check_ranges(&s4, &[(0, 4)]);
     }
@@ -2649,7 +2655,7 @@ mod tests {
         check_ranges(&set3, &[(0, 15)]);
 
         // SubAssign (-=)
-        let mut set4 = set1.clone();
+        let mut set4 = set1;
         set4 -= &set2;
         check_ranges(&set4, &[(0, 4)]);
     }
@@ -2879,7 +2885,7 @@ mod tests {
         // Midpoint with large values
         let large = Range::new(usize::MAX - 100, usize::MAX - 1);
         let mid = large.midpoint();
-        assert!(mid >= usize::MAX - 100 && mid <= usize::MAX - 1);
+        assert!((usize::MAX - 100..=usize::MAX - 1).contains(&mid));
     }
 
     #[test]
@@ -3260,7 +3266,7 @@ mod tests {
         // Large values
         let r = Range::new(usize::MAX - 100, usize::MAX - 1);
         let mid = r.midpoint();
-        assert!(mid >= usize::MAX - 100 && mid <= usize::MAX - 1);
+        assert!((usize::MAX - 100..=usize::MAX - 1).contains(&mid));
         assert_eq!(mid, usize::MAX - 100 + 49); // (MAX-100 + MAX-1) / 2
     }
 

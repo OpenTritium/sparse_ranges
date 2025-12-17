@@ -1,6 +1,6 @@
 [package]
 name = "sparse_ranges"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2024"
 description = "Efficient sparse range set operations, particularly designed for HTTP range requests and file offset management"
 repository = "https://github.com/OpenTritium/sparse_ranges"
@@ -27,12 +27,15 @@ name = "chunk"
 [dependencies]
 http-range-header = { version = "0.4.2", optional = true }
 thiserror = "2.0.17"
+serde = { version = "1.0", optional = true, features = ["derive"] }
 
 [dev-dependencies]
-criterion = "0.7.0"
+criterion = "0.8.1"
 rand = "0.9.2"
 range-set-blaze = "0.4.1"
+serde_json = "1.0"
 
 [features]
 default = ["http"]
 http = ["dep:http-range-header"]
+serde = ["dep:serde"]
