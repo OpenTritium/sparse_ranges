@@ -1983,7 +1983,9 @@ impl Debug for FrozenRangeSet {
 #[cfg(test)]
 #[allow(clippy::pedantic)]
 mod tests {
-    use crate::{Error, FrozenRangeSet, Range, RangeSet};
+    #[cfg(feature = "http")]
+    use crate::Error;
+    use crate::{FrozenRangeSet, Range, RangeSet};
 
     // --- Helper Functions ---
     fn make_set(ranges: &[(usize, usize)]) -> RangeSet {
