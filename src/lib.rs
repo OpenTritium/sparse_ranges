@@ -22,11 +22,15 @@ use serde::{Deserialize, Serialize};
 /// This struct represents a contiguous range of unsigned integers where both
 /// the start and end points are included in the range. It provides various
 /// utility methods for manipulating and querying ranges.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Range {
     start: usize,
     last: usize,
+}
+
+impl Debug for Range {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}..={}", self.start, self.last) }
 }
 
 impl Range {
@@ -345,9 +349,9 @@ impl TryFrom<&ops::Range<usize>> for Range {
     ///
     /// # Errors
     ///
-    /// Returns an error if the range end would cause an overflow when converted
-    /// to an inclusive range (e.g., when `end` is 0 and we try to compute `end - 1`),
-    /// or if the resulting range would be invalid (start > last or last >= `usize::MAX`).
+    /// Returns `Error::IndexOverflow` if the range end is 0 (would underflow when
+    /// computing `end - 1`), or if the resulting range would be invalid (start > last
+    /// or last >= `usize::MAX`).
     #[inline]
     fn try_from(rng: &ops::Range<usize>) -> Result<Self, Self::Error> {
         let start = rng.start;
@@ -1326,10 +1330,13 @@ pub enum Error {
     #[cfg(feature = "http")]
     #[error(transparent)]
     Header(#[from] http_range_header::RangeUnsatisfiableError),
+    /// The range unit is invalid or unsupported.
     #[error("invalid range unit")]
     Invalid,
+    /// An index overflow or underflow occurred during range computation.
     #[error("index overflow")]
     IndexOverflow,
+    /// The resulting range set is empty.
     #[error("empty ranges")]
     Empty,
 }
@@ -1494,7 +1501,7 @@ impl RangeSet {
 /// - Store a range set that won't change
 /// - Share ranges between multiple threads without locks
 /// - Cache intermediate results of range operations
-#[derive(Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Default, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct FrozenRangeSet(Box<[Range]>);
 
@@ -1529,11 +1536,39 @@ impl Deref for FrozenRangeSet {
 
 impl FrozenRangeSet {
     /// Returns the start offset of the first range in the set.
+    ///
+    /// # Returns
+    ///
+    /// `None` if the set is empty, `Some(start)` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{Range, RangeSet};
+    /// let mut set = RangeSet::new();
+    /// set.insert_range(&Range::new(10, 20));
+    /// let frozen = set.freeze();
+    /// assert_eq!(frozen.start(), Some(10));
+    /// ```
     #[inline]
     #[must_use]
     pub fn start(&self) -> Option<usize> { self.0.first().map(Range::start) }
 
     /// Returns the end offset of the last range in the set.
+    ///
+    /// # Returns
+    ///
+    /// `None` if the set is empty, `Some(last)` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{Range, RangeSet};
+    /// let mut set = RangeSet::new();
+    /// set.insert_range(&Range::new(10, 20));
+    /// let frozen = set.freeze();
+    /// assert_eq!(frozen.last(), Some(20));
+    /// ```
     #[inline]
     #[must_use]
     pub fn last(&self) -> Option<usize> { self.0.last().map(Range::last) }
@@ -1620,6 +1655,20 @@ impl FrozenRangeSet {
         let candidate_rng = unsafe { self.0.get_unchecked(partition_idx - 1) };
         candidate_rng.contains(rng)
     }
+
+    /// Returns `true` if the set contains no ranges.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::RangeSet;
+    /// let set = RangeSet::new();
+    /// let frozen = set.freeze();
+    /// assert!(frozen.is_empty());
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn is_empty(&self) -> bool { self.0.is_empty() }
 }
 
 impl BitOr<&FrozenRangeSet> for &RangeSet {
@@ -1924,17 +1973,20 @@ impl Display for Range {
 impl Display for RangeSet {
     /// Formats the `RangeSet` for display purposes.
     ///
-    /// This implementation displays the range set in a human-readable format,
-    /// showing all ranges separated by commas.
+    /// This implementation displays the range set in a human-readable format with
+    /// size units, showing all ranges separated by commas. Use the default format (`{}`)
+    /// for binary units (KiB, MiB, etc.) or alternate format (`{:#}`) for SI units (KB, MB, etc.).
     ///
     /// # Examples
     ///
     /// ```
     /// # use sparse_ranges::{Range, RangeSet};
     /// let mut set = RangeSet::new();
-    /// set.insert_range(&Range::new(0, 10));
-    /// set.insert_range(&Range::new(20, 30));
-    /// println!("{}", set); // "0..=10, 20..=30"
+    /// set.insert_range(&Range::new(0, 1023));
+    /// set.insert_range(&Range::new(2048, 3071));
+    /// println!("{}", set); // "0 ~ 1 KiB, 2 ~ 3 KiB"
+    ///
+    /// println!("{:#}", set); // with SI units
     /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
@@ -1942,7 +1994,7 @@ impl Display for RangeSet {
             if !first {
                 f.write_str(", ")?;
             }
-            write!(f, "{:?}", Range::new(start, last))?;
+            write!(f, "{}", Range::new(start, last))?;
             first = false;
         }
         Ok(())
@@ -1953,7 +2005,7 @@ impl Debug for FrozenRangeSet {
     /// Formats the `FrozenRangeSet` for debugging purposes.
     ///
     /// This implementation displays the frozen range set in a human-readable format,
-    /// showing all the ranges contained in the set separated by commas.
+    /// showing all the ranges contained in the set.
     ///
     /// # Examples
     ///
@@ -1963,10 +2015,36 @@ impl Debug for FrozenRangeSet {
     /// set.insert_range(&Range::new(0, 10));
     /// set.insert_range(&Range::new(20, 30));
     /// let frozen = set.freeze();
-    /// // The output format shows Range structs separated by commas
-    /// let output = format!("{:?}", frozen);
-    /// assert!(output.contains("Range { start: 0, last: 10 }"));
-    /// assert!(output.contains("Range { start: 20, last: 30 }"));
+    /// assert_eq!(format!("{:?}", frozen), "FrozenRangeSet {0..=10, 20..=30}");
+    /// ```
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FrozenRangeSet ")?;
+        let mut set = f.debug_set();
+        for rng in &self.0 {
+            set.entry(&format_args!("{}..={}", rng.start(), rng.last()));
+        }
+        set.finish()
+    }
+}
+
+impl Display for FrozenRangeSet {
+    /// Formats the `FrozenRangeSet` for display purposes.
+    ///
+    /// This implementation displays the frozen range set in a human-readable format with
+    /// size units, showing all ranges separated by commas. Use the default format (`{}`)
+    /// for binary units (KiB, MiB, etc.) or alternate format (`{:#}`) for SI units (KB, MB, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{Range, RangeSet};
+    /// let mut set = RangeSet::new();
+    /// set.insert_range(&Range::new(0, 1023));
+    /// set.insert_range(&Range::new(2048, 3071));
+    /// let frozen = set.freeze();
+    /// println!("{}", frozen); // "0 ~ 1 KiB, 2 ~ 3 KiB"
+    ///
+    /// println!("{:#}", frozen); // with SI units
     /// ```
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut first = true;
@@ -1974,7 +2052,7 @@ impl Debug for FrozenRangeSet {
             if !first {
                 f.write_str(", ")?;
             }
-            write!(f, "{rng:?}")?;
+            write!(f, "{rng}")?;
             first = false;
         }
         Ok(())

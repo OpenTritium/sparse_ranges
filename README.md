@@ -27,9 +27,11 @@ The `#![feature(btree_cursors)]` attribute is used to enable experimental APIs f
 use sparse_ranges::{Range, RangeSet};
 
 let mut ranges = RangeSet::new();
-ranges.insert_range(&Range::new(0, 10));
-ranges.insert_range(&Range::new(20, 30));
+ranges.insert_range(Range::new(0, 10));
+ranges.insert_range(Range::new(20, 30));
 ```
+
+Note: `Range::new(start, last)` creates an inclusive range where both `start` and `last` are included. For example, `Range::new(0, 10)` includes the values 0, 1, 2, ..., 10.
 
 ### Set Operations with Operators
 
@@ -37,10 +39,10 @@ ranges.insert_range(&Range::new(20, 30));
 use sparse_ranges::{Range, RangeSet};
 
 let mut set1 = RangeSet::new();
-set1.insert_range(&Range::new(0, 10));
+set1.insert_range(Range::new(0, 10));
 
 let mut set2 = RangeSet::new();
-set2.insert_range(&Range::new(5, 15));
+set2.insert_range(Range::new(5, 15));
 
 // Union with | operator
 let set3 = set1 | &set2;
@@ -63,8 +65,8 @@ Create an immutable snapshot of a range set that can be shared across threads or
 use sparse_ranges::{Range, RangeSet};
 
 let mut ranges = RangeSet::new();
-ranges.insert_range(&Range::new(0, 10));
-ranges.insert_range(&Range::new(20, 30));
+ranges.insert_range(Range::new(0, 10));
+ranges.insert_range(Range::new(20, 30));
 
 // Create an immutable snapshot with boxed-array-based storage
 let frozen = ranges.freeze();
@@ -76,10 +78,10 @@ assert_eq!(frozen.ranges_count(), 2); // Number of separate ranges
 ```
 
 The `freeze` operation creates a `FrozenRangeSet`, which is an immutable version of `RangeSet`. This is useful when you need to:
-- Converts the internal BTreeMap structure to an array for better cache locality
-- Provides immutable but efficient access to range data
-- Maintains all query capabilities (contains, contains_n, etc.)
-- Allows efficient iteration over the ranges
+- Convert the internal BTreeMap structure to an array for better cache locality
+- Provide immutable but efficient access to range data
+- Maintain all query capabilities (contains, contains_n, etc.)
+- Allow efficient iteration over the ranges
 
 
 ### Chunking
@@ -90,7 +92,7 @@ Process large ranges in smaller blocks:
 use sparse_ranges::{Range, RangeSet};
 
 let mut ranges = RangeSet::new();
-ranges.insert_range(&Range::new(0, 1000));
+ranges.insert_range(Range::new(0, 1000));
 
 // Process ranges in chunks of ~100 elements each
 let mut chunks = ranges.into_chunks(100);
