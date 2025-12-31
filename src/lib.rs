@@ -10,7 +10,7 @@
 use std::{
     collections::BTreeMap,
     fmt::{self, Debug, Display},
-    ops::{self, BitOr, BitOrAssign, Bound, Deref, Not, Sub, SubAssign},
+    ops::{self, BitAnd, BitAndAssign, BitOr, BitOrAssign, Bound, Deref, Not, Sub, SubAssign},
 };
 use thiserror::Error;
 
@@ -1000,6 +1000,141 @@ impl RangeSet {
         *self = self.difference(other);
     }
 
+    /// Computes the intersection of two `RangeSet`s.
+    ///
+    /// This method chooses the most efficient algorithm based on the sizes of the sets.
+    /// If one set is much smaller than the other, it uses an insertion-based approach.
+    /// Otherwise, it uses a two-pointer merge-based approach.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The set to intersect with
+    ///
+    /// # Returns
+    ///
+    /// A new `RangeSet` containing the intersection of both sets.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use sparse_ranges::{RangeSet, Range};
+    /// let mut set1 = RangeSet::new();
+    /// set1.insert_range(&Range::new(0, 10));
+    /// set1.insert_range(&Range::new(20, 30));
+    /// let mut set2 = RangeSet::new();
+    /// set2.insert_range(&Range::new(5, 15));
+    /// set2.insert_range(&Range::new(25, 35));
+    /// let result = set1.intersection(&set2);
+    /// assert_eq!(result.len(), 12); // 5-10 (6) and 25-30 (6) = 12
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn intersection(&self, other: &Self) -> Self {
+        // Fast path: empty sets
+        if self.0.is_empty() || other.0.is_empty() {
+            return Self::new();
+        }
+
+        // Fast path: boundary check - no possible overlap
+        if let (Some(self_last), Some(other_first)) = (self.last(), other.start())
+            && self_last < other_first
+        {
+            return Self::new();
+        }
+        if let (Some(other_last), Some(self_first)) = (other.last(), self.start())
+            && other_last < self_first
+        {
+            return Self::new();
+        }
+
+        // Strategy selection (mirroring the union logic)
+        let self_rng_count = self.ranges_count();
+        let other_rng_count = other.ranges_count();
+        let insert_cost_estimate = other_rng_count * self_rng_count.ilog2() as usize;
+        let merge_cost_estimate = self_rng_count + other_rng_count;
+
+        if insert_cost_estimate < merge_cost_estimate && other_rng_count < self_rng_count {
+            // Strategy A: Insert-based iteration (when one set is much smaller)
+            self.intersection_insert(other)
+        } else {
+            // Strategy B: Two-pointer merge (general case)
+            self.intersection_merge(other)
+        }
+    }
+
+    /// Insert-based intersection algorithm.
+    ///
+    /// Iterates through the smaller set and finds intersections in the larger set.
+    /// Efficient when one set has significantly fewer ranges than the other.
+    ///
+    /// Time complexity: O(min(m,n) * log(max(m,n)))
+    #[must_use]
+    #[inline]
+    pub fn intersection_insert(&self, other: &Self) -> Self {
+        let mut result = Self::new();
+        for (&start, &last) in &other.0 {
+            let range = unsafe { Range::new_unchecked(start, last) };
+            for (&s_start, &s_last) in self.0.range(start..=last) {
+                let self_range = unsafe { Range::new_unchecked(s_start, s_last) };
+                if let Some(intersection) = range.intersection(&self_range) {
+                    result.insert_range(&intersection);
+                }
+            }
+        }
+        result
+    }
+
+    /// Two-pointer merge-based intersection algorithm.
+    ///
+    /// Walks through both sorted range sets simultaneously, similar to the merge step
+    /// in merge sort. Efficient when both sets have similar numbers of ranges.
+    ///
+    /// Time complexity: O(m + n)
+    #[must_use]
+    #[inline]
+    pub fn intersection_merge(&self, other: &Self) -> Self {
+        let mut result = Self::new();
+        let mut self_it = self.0.iter().peekable();
+        let mut other_it = other.0.iter().peekable();
+        while let Some(&(&self_start, &self_last)) = self_it.peek() {
+            if let Some(&(&other_start, &other_last)) = other_it.peek() {
+                let self_range = Range::new(self_start, self_last);
+                let other_range = Range::new(other_start, other_last);
+                // Skip non-intersecting self range
+                if self_range.last < other_range.start {
+                    self_it.next();
+                    continue;
+                }
+                // Skip non-intersecting other range
+                if other_range.last < self_range.start {
+                    other_it.next();
+                    continue;
+                }
+                // Calculate and insert intersection
+                if let Some(intersection) = self_range.intersection(&other_range) {
+                    result.insert_range(&intersection);
+                }
+                // Advance the pointer that ends first
+                if self_range.last <= other_range.last {
+                    self_it.next();
+                } else {
+                    other_it.next();
+                }
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
+    /// Performs intersection operation and assigns the result to self.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The set to intersect with
+    #[inline]
+    pub fn intersection_assign(&mut self, other: &Self) { *self = self.intersection(other); }
+
     /// Computes the union of a `RangeSet` with a `FrozenRangeSet`.
     ///
     /// Creates a new `RangeSet` that is the union of `self` and a `FrozenRangeSet`.
@@ -1222,6 +1357,20 @@ impl Sub<Self> for &RangeSet {
     /// Performs the `-` operation, equivalent to [`RangeSet::difference`].
     #[inline]
     fn sub(self, rhs: Self) -> Self::Output { self.difference(rhs) }
+}
+
+impl BitAndAssign<&Self> for RangeSet {
+    /// Performs the `&=` operation, equivalent to [`RangeSet::intersection_assign`](RangeSet::intersection_assign).
+    #[inline]
+    fn bitand_assign(&mut self, rhs: &Self) { self.intersection_assign(rhs); }
+}
+
+impl BitAnd<Self> for &RangeSet {
+    type Output = RangeSet;
+
+    /// Performs the `&` operation, equivalent to [`RangeSet::intersection`].
+    #[inline]
+    fn bitand(self, rhs: Self) -> Self::Output { self.intersection(rhs) }
 }
 
 /// An iterator that chunks an `RangeSet` into fixed-size blocks.
@@ -3283,6 +3432,146 @@ mod tests {
 
         let diff2 = set2.difference(&set1);
         check_ranges(&diff2, &[(20, 30)]); // No change
+    }
+
+    #[test]
+    fn test_rangeset_intersection_basic() {
+        let set1 = make_set(&[(0, 10), (20, 30)]);
+        let set2 = make_set(&[(5, 15), (25, 35)]);
+
+        let result = set1.intersection(&set2);
+        check_ranges(&result, &[(5, 10), (25, 30)]);
+        assert_eq!(result.len(), 12); // (10-5+1) + (30-25+1) = 6 + 6 = 12
+    }
+
+    #[test]
+    fn test_rangeset_intersection_no_overlap() {
+        let set1 = make_set(&[(0, 10)]);
+        let set2 = make_set(&[(20, 30)]);
+
+        let result = set1.intersection(&set2);
+        assert!(result.is_empty());
+
+        let result2 = set2.intersection(&set1);
+        assert!(result2.is_empty());
+    }
+
+    #[test]
+    fn test_rangeset_intersection_complete_overlap() {
+        let set1 = make_set(&[(0, 10), (20, 30)]);
+        let set2 = make_set(&[(0, 10), (20, 30)]);
+
+        let result = set1.intersection(&set2);
+        check_ranges(&result, &[(0, 10), (20, 30)]);
+        assert_eq!(result.len(), 22);
+    }
+
+    #[test]
+    fn test_rangeset_intersection_subset() {
+        let set1 = make_set(&[(0, 30)]);
+        let set2 = make_set(&[(10, 20)]);
+
+        let result = set1.intersection(&set2);
+        check_ranges(&result, &[(10, 20)]);
+        assert_eq!(result.len(), 11);
+    }
+
+    #[test]
+    fn test_rangeset_intersection_empty_sets() {
+        let empty = RangeSet::new();
+        let non_empty = make_set(&[(0, 10)]);
+
+        // Empty ∩ Empty = Empty
+        let result = empty.intersection(&empty);
+        assert!(result.is_empty());
+
+        // Empty ∩ NonEmpty = Empty
+        let result = empty.intersection(&non_empty);
+        assert!(result.is_empty());
+
+        // NonEmpty ∩ Empty = Empty
+        let result = non_empty.intersection(&empty);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_rangeset_intersection_single_point() {
+        let set1 = make_set(&[(0, 10)]);
+        let set2 = make_set(&[(10, 20)]);
+
+        let result = set1.intersection(&set2);
+        check_ranges(&result, &[(10, 10)]);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_rangeset_intersection_multiple_ranges() {
+        let set1 = make_set(&[(0, 5), (10, 15), (20, 25), (30, 35)]);
+        let set2 = make_set(&[(3, 7), (13, 17), (23, 27), (33, 37)]);
+
+        let result = set1.intersection(&set2);
+        check_ranges(&result, &[(3, 5), (13, 15), (23, 25), (33, 35)]);
+        assert_eq!(result.len(), 12); // (5-3+1) + (15-13+1) + (25-23+1) + (35-33+1) = 3+3+3+3 = 12
+    }
+
+    #[test]
+    fn test_rangeset_intersection_boundary_values() {
+        // Test with usize::MAX boundary
+        let set1 = make_set(&[(usize::MAX - 20, usize::MAX - 10)]);
+        let set2 = make_set(&[(usize::MAX - 15, usize::MAX - 5)]);
+
+        let result = set1.intersection(&set2);
+        check_ranges(&result, &[(usize::MAX - 15, usize::MAX - 10)]);
+        assert_eq!(result.len(), 6);
+    }
+
+    #[test]
+    fn test_rangeset_intersection_bitand_operator() {
+        let set1 = make_set(&[(0, 10), (20, 30)]);
+        let set2 = make_set(&[(5, 15), (25, 35)]);
+
+        let result = &set1 & &set2;
+        check_ranges(&result, &[(5, 10), (25, 30)]);
+    }
+
+    #[test]
+    fn test_rangeset_intersection_bitand_assign_operator() {
+        let mut set1 = make_set(&[(0, 10), (20, 30)]);
+        let set2 = make_set(&[(5, 15), (25, 35)]);
+
+        set1 &= &set2;
+        check_ranges(&set1, &[(5, 10), (25, 30)]);
+    }
+
+    #[test]
+    fn test_rangeset_intersection_with_extreme_values() {
+        // Test intersection near usize boundaries
+        let set1 = make_set(&[(0, 10), (usize::MAX - 10, usize::MAX - 1)]);
+        let set2 = make_set(&[(5, 15), (usize::MAX - 5, usize::MAX - 1)]);
+
+        let result = set1.intersection(&set2);
+        check_ranges(&result, &[(5, 10), (usize::MAX - 5, usize::MAX - 1)]);
+        assert_eq!(result.len(), 11); // 6 + 5 = 11
+    }
+
+    #[test]
+    fn test_rangeset_intersection_assign() {
+        let mut set1 = make_set(&[(0, 10), (20, 30)]);
+        let set2 = make_set(&[(5, 15), (25, 35)]);
+
+        set1.intersection_assign(&set2);
+        check_ranges(&set1, &[(5, 10), (25, 30)]);
+    }
+
+    #[test]
+    fn test_rangeset_intersection_symmetric() {
+        let set1 = make_set(&[(0, 10), (20, 30)]);
+        let set2 = make_set(&[(5, 15), (25, 35)]);
+
+        let result1 = set1.intersection(&set2);
+        let result2 = set2.intersection(&set1);
+
+        assert_eq!(result1, result2);
     }
 
     #[test]
